@@ -20,6 +20,7 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+      - ServerSideApply=true # les CRD Kyverno (ClusterPolicy) dépassent la limite d'annotation en apply classique
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application

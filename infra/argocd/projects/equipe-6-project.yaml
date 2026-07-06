@@ -6,7 +6,11 @@ metadata:
 spec:
   description: "Projet Hackathon OVHcloud x Ynov - Equipe 6"
   sourceRepos:
-    - "https://github.com/*/Hackathon_OVH_Equipe_6.git"
+    - "https://github.com/yapcyber/Hackathon_OVH_Equipe_6.git"
+    - "https://kyverno.github.io/kyverno/"
+    - "https://falcosecurity.github.io/charts"
+    - "https://aquasecurity.github.io/helm-charts/"
+    - "https://prometheus-community.github.io/helm-charts"
   destinations:
     - namespace: "*"
       server: "https://kubernetes.default.svc"
