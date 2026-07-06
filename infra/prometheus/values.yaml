@@ -1,0 +1,9 @@
+# Référence : consommé par infra/argocd/applications/prometheus.yaml
+prometheus:
+  prometheusSpec:
+    retention: 15d
+    serviceMonitorSelectorNilUsesHelmValues: false
+
+grafana:
+  enabled: true
+  defaultDashboardsEnabled: true

@@ -1,0 +1,37 @@
+# RBAC du Job d'enrichissement/IA/PR.
+# Droit UNIQUE : lecture seule (get/list/watch) sur les workloads, pour
+# construire le contexte envoyé à l'IA. AUCUN verbe d'écriture
+# (create/update/patch/delete) sur quoi que ce soit dans le cluster.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ai-remediation-job
+  namespace: remediation
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ai-remediation-job-readonly
+rules:
+  - apiGroups: ["", "apps", "batch"]
+    resources: ["pods", "deployments", "replicasets", "jobs", "namespaces"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["wgpolicyk8s.io"]
+    resources: ["policyreports", "clusterpolicyreports"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["aquasecurity.github.io"]
+    resources: ["vulnerabilityreports", "configauditreports"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ai-remediation-job-readonly
+subjects:
+  - kind: ServiceAccount
+    name: ai-remediation-job
+    namespace: remediation
+roleRef:
+  kind: ClusterRole
+  name: ai-remediation-job-readonly
+  apiGroup: rbac.authorization.k8s.io

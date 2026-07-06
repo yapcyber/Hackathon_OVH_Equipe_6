@@ -1,0 +1,41 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kyverno
+  namespace: argocd
+spec:
+  project: equipe-6
+  source:
+    repoURL: "https://kyverno.github.io/kyverno/"
+    chart: kyverno
+    targetRevision: "3.2.6"
+    helm:
+      releaseName: kyverno
+  destination:
+    server: "https://kubernetes.default.svc"
+    namespace: kyverno
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kyverno-policies
+  namespace: argocd
+spec:
+  project: equipe-6
+  source:
+    repoURL: "https://github.com/<org>/Hackathon_OVH_Equipe_6.git"
+    targetRevision: main
+    path: infra/kyverno/policies
+  destination:
+    server: "https://kubernetes.default.svc"
+    namespace: kyverno
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

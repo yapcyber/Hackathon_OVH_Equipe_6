@@ -1,0 +1,8 @@
+# Référence : consommé par infra/argocd/applications/trivy-operator.yaml
+trivy:
+  ignoreUnfixed: false
+  severity: "CRITICAL,HIGH"
+
+operator:
+  webhookBroadcastURL: "http://ai-remediation-webhook.remediation.svc.cluster.local:8080/webhook/trivy"
+  scanJobsConcurrentLimit: 3

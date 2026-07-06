@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-remediation-webhook
+  namespace: remediation
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ai-remediation-webhook
+  template:
+    metadata:
+      labels:
+        app: ai-remediation-webhook
+    spec:
+      serviceAccountName: ai-remediation-webhook
+      containers:
+        - name: webhook
+          image: ghcr.io/<org>/ai-remediation-engine:latest
+          command: ["python", "-m", "uvicorn", "webhook_receiver:app", "--host", "0.0.0.0", "--port", "8080"]
+          ports:
+            - containerPort: 8080
+          env:
+            - name: NAMESPACE
+              value: remediation
+            - name: JOB_IMAGE
+              value: "ghcr.io/<org>/ai-remediation-engine:latest"
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: 200m, memory: 128Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            privileged: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-remediation-webhook
+  namespace: remediation
+spec:
+  selector:
+    app: ai-remediation-webhook
+  ports:
+    - port: 8080
+      targetPort: 8080

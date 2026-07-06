@@ -1,0 +1,32 @@
+# RBAC du Deployment "webhook receiver".
+# Droit UNIQUE : créer des Jobs dans le namespace `remediation`.
+# Aucun droit sur Deployments, Policies, Secrets d'autres namespaces, etc.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ai-remediation-webhook
+  namespace: remediation
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ai-remediation-webhook
+  namespace: remediation
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ai-remediation-webhook
+  namespace: remediation
+subjects:
+  - kind: ServiceAccount
+    name: ai-remediation-webhook
+    namespace: remediation
+roleRef:
+  kind: Role
+  name: ai-remediation-webhook
+  apiGroup: rbac.authorization.k8s.io

@@ -1,0 +1,27 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: trivy-operator
+  namespace: argocd
+spec:
+  project: equipe-6
+  source:
+    repoURL: "https://aquasecurity.github.io/helm-charts/"
+    chart: trivy-operator
+    targetRevision: "0.24.1"
+    helm:
+      releaseName: trivy-operator
+      valuesObject:
+        trivy:
+          ignoreUnfixed: false
+        operator:
+          webhookBroadcastURL: "http://ai-remediation-webhook.remediation.svc.cluster.local:8080/webhook/trivy"
+  destination:
+    server: "https://kubernetes.default.svc"
+    namespace: trivy-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

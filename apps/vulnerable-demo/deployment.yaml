@@ -1,0 +1,34 @@
+# Workload volontairement vulnérable — sert uniquement à déclencher
+# Falco (runtime) / Trivy (image + config) / Kyverno (admission) pendant la démo.
+# Ne JAMAIS déployer ceci hors du cluster de démo.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vulnerable-demo
+  namespace: demo
+  labels:
+    app: vulnerable-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vulnerable-demo
+  template:
+    metadata:
+      labels:
+        app: vulnerable-demo
+    spec:
+      containers:
+        - name: app
+          image: nginx:latest # tag flottant -> flag Trivy/Kubescape
+          securityContext:
+            privileged: true # -> flag Falco/Kyverno
+            runAsUser: 0
+          volumeMounts:
+            - name: host-root
+              mountPath: /host
+      volumes:
+        - name: host-root
+          hostPath:
+            path: /
+      restartPolicy: Always

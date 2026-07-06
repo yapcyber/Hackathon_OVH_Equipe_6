@@ -1,0 +1,13 @@
+# Référence : consommé par infra/argocd/applications/falco.yaml (valuesObject inline).
+# Conservé ici comme documentation / valeurs de secours pour un déploiement Helm manuel.
+driver:
+  kind: ebpf
+
+falcosidekick:
+  enabled: true
+  config:
+    webhook:
+      address: "http://ai-remediation-webhook.remediation.svc.cluster.local:8080/webhook/falco"
+      customHeaders: "X-Source: falco"
+  webui:
+    enabled: true

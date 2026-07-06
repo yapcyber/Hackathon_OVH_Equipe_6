@@ -1,0 +1,30 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: falco
+  namespace: argocd
+spec:
+  project: equipe-6
+  source:
+    repoURL: "https://falcosecurity.github.io/charts"
+    chart: falco
+    targetRevision: "4.7.4"
+    helm:
+      releaseName: falco
+      valuesObject:
+        driver:
+          kind: ebpf
+        falcosidekick:
+          enabled: true
+          config:
+            webhook:
+              address: "http://ai-remediation-webhook.remediation.svc.cluster.local:8080/webhook/falco"
+  destination:
+    server: "https://kubernetes.default.svc"
+    namespace: falco
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

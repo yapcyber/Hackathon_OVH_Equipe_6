@@ -1,0 +1,25 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: equipe-6
+  namespace: argocd
+spec:
+  description: "Projet Hackathon OVHcloud x Ynov - Equipe 6"
+  sourceRepos:
+    - "https://github.com/*/Hackathon_OVH_Equipe_6.git"
+  destinations:
+    - namespace: "*"
+      server: "https://kubernetes.default.svc"
+  clusterResourceWhitelist:
+    - group: "*"
+      kind: "*"
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"
+  # Aucune Application de ce projet ne peut activer le "self-heal" agressif
+  # sur les namespaces critiques sans revue explicite du diff dans Argo CD UI.
+  roles:
+    - name: readonly
+      description: "Lecture seule pour la démo / jury"
+      policies:
+        - p, proj:equipe-6:readonly, applications, get, equipe-6/*, allow
