@@ -14,10 +14,10 @@ from pathlib import Path
 
 import httpx
 
-GIT_REPO_URL = os.environ["GITOPS_REPO_URL"]  # ex: https://github.com/<org>/Hackathon_OVH_Equipe_6.git
+GIT_REPO_URL = os.environ["GITOPS_REPO_URL"]  # ex: https://github.com/yapcyber/Hackathon_OVH_Equipe_6.git
 GIT_PR_TOKEN = os.environ["GIT_PR_TOKEN"]
 GITHUB_API_URL = os.environ.get("GITHUB_API_URL", "https://api.github.com")
-GITHUB_REPO_SLUG = os.environ["GITHUB_REPO_SLUG"]  # ex: <org>/Hackathon_OVH_Equipe_6
+GITHUB_REPO_SLUG = os.environ["GITHUB_REPO_SLUG"]  # ex: yapcyber/Hackathon_OVH_Equipe_6
 
 
 def open_remediation_pr(alert_source: str, fingerprint: str, patch_yaml: str, explanation: str) -> str:

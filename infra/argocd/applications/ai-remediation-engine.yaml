@@ -6,7 +6,7 @@ metadata:
 spec:
   project: equipe-6
   source:
-    repoURL: "https://github.com/<org>/Hackathon_OVH_Equipe_6.git"
+    repoURL: "https://github.com/yapcyber/Hackathon_OVH_Equipe_6.git"
     targetRevision: main
     path: ai-remediation-engine/k8s
   destination:
