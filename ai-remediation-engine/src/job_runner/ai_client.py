@@ -10,7 +10,7 @@ import os
 import httpx
 
 AI_ENDPOINTS_BASE_URL = os.environ.get(
-    "OVH_AI_ENDPOINTS_BASE_URL", "https://endpoints.ai.cloud.ovh.net"
+    "OVH_AI_ENDPOINTS_BASE_URL", "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1"
 )
 AI_ENDPOINTS_MODEL = os.environ.get("OVH_AI_ENDPOINTS_MODEL", "Meta-Llama-3_3-70B-Instruct")
 
@@ -27,7 +27,7 @@ class AIEndpointsClient:
         }
 
     def generate_remediation(self, prompt: str, model: str = AI_ENDPOINTS_MODEL) -> str:
-        url = f"{self.base_url}/{model}/api/openai_compat/v1/chat/completions"
+        url = f"{self.base_url}/chat/completions"
         body = {
             "model": model,
             "messages": [

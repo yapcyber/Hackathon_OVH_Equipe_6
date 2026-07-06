@@ -10,7 +10,7 @@ sur le cluster.
   dédoublonne, crée un `Job` par alerte. RBAC : `create` sur `Jobs` uniquement.
 - `src/job_runner/` — code exécuté par chaque `Job` éphémère :
   - `enrichment.py` : lecture seule du manifeste K8s concerné + construction du prompt.
-  - `ai_client.py` : appel `POST {OVH_AI_ENDPOINTS_BASE_URL}/{model}/api/openai_compat/v1/chat/completions`
+  - `ai_client.py` : appel `POST {OVH_AI_ENDPOINTS_BASE_URL}/chat/completions` (`https://oai.endpoints.kepler.ai.cloud.ovh.net/v1` par défaut, compatible OpenAI)
     avec `Authorization: Bearer $OVH_AI_ENDPOINTS_ACCESS_TOKEN`.
   - `pr_generator.py` : clone, commit sur une branche `ai-remediation/*`, ouvre une PR **draft**.
   - `main.py` : orchestration des 3 étapes ci-dessus.
