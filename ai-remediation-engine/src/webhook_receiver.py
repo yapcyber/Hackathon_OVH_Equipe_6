@@ -12,6 +12,7 @@ Ce composant ne possède AUCUN droit d'écriture sur le cluster au-delà de
 Il ne détient jamais le token AI Endpoints ni le token Git.
 """
 import hashlib
+import json
 import logging
 import os
 import time
@@ -26,6 +27,12 @@ NAMESPACE = os.environ.get("NAMESPACE", "remediation")
 JOB_IMAGE = os.environ["JOB_IMAGE"]  # image de ai-remediation-engine/Dockerfile
 DEDUP_TTL_SECONDS = int(os.environ.get("DEDUP_TTL_SECONDS", "300"))
 
+# Namespaces scannés/observés par notre propre stack de sécurité : on ignore
+# systématiquement leurs alertes pour éviter les boucles auto-référentielles
+# (Trivy qui scanne les Jobs de remédiation, Falco qui flag le webhook lui-même).
+WATCHED_NAMESPACE = os.environ.get("WATCHED_NAMESPACE", "demo")
+IGNORED_NAMESPACES = {"remediation", "kube-system", "argocd", "kyverno", "trivy-system", "monitoring", "falco"}
+
 app = FastAPI()
 _recent_fingerprints: dict[str, float] = {}
 
@@ -38,7 +45,11 @@ batch_v1 = client.BatchV1Api()
 
 
 def _fingerprint(source: str, payload: dict) -> str:
-    key = f"{source}:{payload.get('rule') or payload.get('resource') or payload}"
+    if source == "falco":
+        identity = payload.get("rule", "")
+    else:  # trivy: une VulnerabilityReport est identifiée par son nom (= image scannée)
+        identity = payload.get("metadata", {}).get("name", "")
+    key = f"{source}:{identity}"
     return hashlib.sha256(key.encode()).hexdigest()[:16]
 
 
@@ -77,7 +88,7 @@ def _create_remediation_job(source: str, fp: str, payload: dict) -> str:
                             command=["python", "-m", "job_runner.main"],
                             env=[
                                 client.V1EnvVar(name="ALERT_SOURCE", value=source),
-                                client.V1EnvVar(name="ALERT_PAYLOAD", value=str(payload)),
+                                client.V1EnvVar(name="ALERT_PAYLOAD", value=json.dumps(payload)),
                                 client.V1EnvVar(
                                     name="OVH_AI_ENDPOINTS_ACCESS_TOKEN",
                                     value_from=client.V1EnvVarSource(
@@ -120,6 +131,9 @@ def _create_remediation_job(source: str, fp: str, payload: dict) -> str:
 @app.post("/webhook/falco")
 async def falco_webhook(request: Request):
     payload = await request.json()
+    ns = payload.get("output_fields", {}).get("k8s.ns.name")
+    if ns in IGNORED_NAMESPACES or ns != WATCHED_NAMESPACE:
+        return Response(status_code=202, content=f"namespace '{ns}' hors périmètre, ignoré")
     fp = _fingerprint("falco", payload)
     if _is_duplicate(fp):
         return Response(status_code=202, content="duplicate, ignored")
@@ -131,6 +145,11 @@ async def falco_webhook(request: Request):
 @app.post("/webhook/trivy")
 async def trivy_webhook(request: Request):
     payload = await request.json()
+    if payload.get("kind") != "VulnerabilityReport":
+        return Response(status_code=202, content="rapport non-VulnerabilityReport, ignoré")
+    ns = payload.get("metadata", {}).get("namespace")
+    if ns in IGNORED_NAMESPACES or ns != WATCHED_NAMESPACE:
+        return Response(status_code=202, content=f"namespace '{ns}' hors périmètre, ignoré")
     fp = _fingerprint("trivy", payload)
     if _is_duplicate(fp):
         return Response(status_code=202, content="duplicate, ignored")

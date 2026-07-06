@@ -12,7 +12,7 @@ from kubernetes import client, config
 
 
 def load_alert(source: str, raw_payload: str) -> dict:
-    return {"source": source, "payload": json.loads(raw_payload.replace("'", '"'))}
+    return {"source": source, "payload": json.loads(raw_payload)}
 
 
 def fetch_target_manifest(namespace: str, kind: str, name: str) -> dict:
