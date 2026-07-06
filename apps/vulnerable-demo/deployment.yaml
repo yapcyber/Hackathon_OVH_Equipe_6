@@ -1,5 +1,10 @@
 # Workload volontairement vulnérable — sert uniquement à déclencher
-# Falco (runtime) / Trivy (image + config) / Kyverno (admission) pendant la démo.
+# Falco (runtime) / Trivy (image + config) pendant la démo.
+# Pas de securityContext.privileged: la ClusterPolicy Kyverno
+# disallow-privileged-containers est en mode Enforce et bloquerait
+# purement et simplement le déploiement (déjà démontré séparément
+# avec un pod ad-hoc). Ce workload reste volontairement vulnérable
+# via l'image taguée "latest", l'exécution root et le hostPath.
 # Ne JAMAIS déployer ceci hors du cluster de démo.
 apiVersion: apps/v1
 kind: Deployment
@@ -22,8 +27,7 @@ spec:
         - name: app
           image: nginx:latest # tag flottant -> flag Trivy/Kubescape
           securityContext:
-            privileged: true # -> flag Falco/Kyverno
-            runAsUser: 0
+            runAsUser: 0 # root -> flag Falco/Trivy
           volumeMounts:
             - name: host-root
               mountPath: /host

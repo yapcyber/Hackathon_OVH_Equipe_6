@@ -14,6 +14,8 @@ spec:
       valuesObject:
         driver:
           kind: modern_ebpf
+          modernEbpf:
+            leastPrivileged: true # capabilities ciblées (BPF/SYS_RESOURCE/PERFMON/SYS_PTRACE) au lieu de privileged:true, compatible avec la ClusterPolicy Kyverno
         falcosidekick:
           enabled: true
           config:

@@ -69,6 +69,7 @@ def _create_remediation_job(source: str, fp: str, payload: dict) -> str:
                 spec=client.V1PodSpec(
                     service_account_name="ai-remediation-job",
                     restart_policy="Never",
+                    image_pull_secrets=[client.V1LocalObjectReference(name="ghcr-pull-secret")],
                     containers=[
                         client.V1Container(
                             name="remediate",
@@ -92,6 +93,14 @@ def _create_remediation_job(source: str, fp: str, payload: dict) -> str:
                                             name="git-pr-credentials", key="token"
                                         )
                                     ),
+                                ),
+                                client.V1EnvVar(
+                                    name="GITOPS_REPO_URL",
+                                    value="https://github.com/yapcyber/Hackathon_OVH_Equipe_6.git",
+                                ),
+                                client.V1EnvVar(
+                                    name="GITHUB_REPO_SLUG",
+                                    value="yapcyber/Hackathon_OVH_Equipe_6",
                                 ),
                             ],
                             resources=client.V1ResourceRequirements(
