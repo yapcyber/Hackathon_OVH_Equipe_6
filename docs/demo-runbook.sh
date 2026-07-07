@@ -60,13 +60,19 @@ kubectl get clusterpolicy disallow-privileged-containers
 pause
 
 echo "Tentative de création d'un pod privilégié (comme le ferait un"
-echo "attaquant ou une config malveillante) :"
+echo "attaquant ou une config malveillante) — le message d'erreur qui va"
+echo "s'afficher est ATTENDU, c'est la preuve que Kyverno bloque :"
 echo
-kubectl run demo-privileged --image=nginx:latest --restart=Never -n demo \
-  --overrides='{"spec":{"containers":[{"name":"demo-privileged","image":"nginx:latest","securityContext":{"privileged":true}}]}}' \
-  || echo
-echo
-echo ">>> Bloqué à l'admission, AVANT même d'atteindre un node. <<<"
+kubectl delete pod demo-privileged -n demo --ignore-not-found >/dev/null 2>&1
+if kubectl run demo-privileged --image=nginx:latest --restart=Never -n demo \
+  --overrides='{"spec":{"containers":[{"name":"demo-privileged","image":"nginx:latest","securityContext":{"privileged":true}}]}}'; then
+  echo
+  echo ">>> ATTENTION : le pod a été créé — la policy NE bloque PAS. <<<"
+  echo ">>> Vérifier 'kubectl get clusterpolicy disallow-privileged-containers'. <<<"
+else
+  echo
+  echo ">>> Bloqué à l'admission, confirmé — AVANT même d'atteindre un node. <<<"
+fi
 pause
 
 echo "4 autres ClusterPolicy tournent en mode Audit (n'bloquent jamais la"
