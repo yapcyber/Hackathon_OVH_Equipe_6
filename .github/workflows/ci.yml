@@ -1,0 +1,120 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  unit-tests:
+    name: Tests unitaires (job_runner / webhook_receiver)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ai-remediation-engine
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install --no-cache-dir -r requirements.txt -r requirements-dev.txt
+      - run: pytest -v
+
+  validate-manifests:
+    name: Validation structurelle des manifestes (kubeconform)
+    runs-on: ubuntu-latest
+    env:
+      KUBECONFORM_VERSION: "0.8.0"
+      KUBECONFORM_SHA256: "9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Installer kubectl (pour "kubectl kustomize")
+        run: |
+          KUBECTL_VERSION="$(curl -sL https://dl.k8s.io/release/stable.txt)"
+          curl -sSL -o kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/kubectl
+
+      - name: Installer kubeconform (même version que ai-remediation-engine/Dockerfile)
+        run: |
+          curl -sSL -o /tmp/kubeconform.tar.gz \
+            "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "${KUBECONFORM_SHA256}  /tmp/kubeconform.tar.gz" | sha256sum -c -
+          sudo tar -xzf /tmp/kubeconform.tar.gz -C /usr/local/bin kubeconform
+
+      - name: Valider les Kustomization (kustomize build + kubeconform)
+        run: |
+          kubectl kustomize ai-remediation-engine/k8s | kubeconform -strict -summary
+          kubectl kustomize apps/vulnerable-demo | kubeconform -strict -summary
+
+      - name: Valider les manifestes bruts (Argo CD Application/AppProject, Kyverno ClusterPolicy, dashboards Grafana)
+        run: |
+          # -schema-location supplémentaire : catalogue communautaire de schémas
+          # pour les CRD (Application/AppProject/ClusterPolicy ne sont pas des
+          # types Kubernetes "core", kubeconform ne les connaît pas nativement).
+          kubeconform -strict -summary \
+            -schema-location default \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            infra/argocd/applications/*.yaml \
+            infra/argocd/projects/*.yaml \
+            infra/kyverno/policies/*.yaml \
+            infra/prometheus/dashboards/*.yaml
+
+  kyverno-policy-regression:
+    name: Régression policies Kyverno vs vulnerable-demo
+    runs-on: ubuntu-latest
+    env:
+      KYVERNO_CLI_VERSION: "1.18.1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Installer le CLI Kyverno
+        run: |
+          curl -sSL -o /tmp/kyverno-cli.tar.gz \
+            "https://github.com/kyverno/kyverno/releases/download/v${KYVERNO_CLI_VERSION}/kyverno-cli_v${KYVERNO_CLI_VERSION}_linux_x86_64.tar.gz"
+          sudo tar -xzf /tmp/kyverno-cli.tar.gz -C /usr/local/bin kyverno
+
+      - name: Vérifier que vulnerable-demo déclenche exactement les findings attendus
+        run: |
+          # vulnerable-demo est INTENTIONNELLEMENT non conforme sur 4 points
+          # (voir docs/DOSSIER_TECHNIQUE.md §2.2). Ce test échoue si :
+          #  - une policy casse (erreur de syntaxe) et matche moins de findings,
+          #  - ou si quelqu'un "corrige" vulnerable-demo sans mettre à jour ce test.
+          set -o pipefail
+          OUTPUT=$(kyverno apply infra/kyverno/policies/ --resource apps/vulnerable-demo/deployment.yaml 2>&1) || true
+          echo "$OUTPUT"
+          echo "$OUTPUT" | grep -q "pass: 2, fail: 4, warn: 0, error: 0, skip: 0" || {
+            echo "::error::Résultat Kyverno inattendu — attendu 'pass: 2, fail: 4', voir la sortie ci-dessus."
+            exit 1
+          }
+
+  build-and-push:
+    name: Build & push image (main uniquement)
+    runs-on: ubuntu-latest
+    needs: [unit-tests, validate-manifests, kyverno-policy-regression]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ai-remediation-engine
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/ai-remediation-engine:latest
+            ghcr.io/${{ github.repository_owner }}/ai-remediation-engine:sha-${{ github.sha }}

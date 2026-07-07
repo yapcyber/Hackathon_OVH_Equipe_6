@@ -13,7 +13,9 @@ spec:
       releaseName: trivy-operator
       valuesObject:
         trivy:
-          ignoreUnfixed: false
+          # true : pas de PR pour une CVE sans correctif publié (bruit inutile,
+          # coût d'appel IA pour rien — voir infra/trivy/values.yaml).
+          ignoreUnfixed: true
         operator:
           webhookBroadcastURL: "http://ai-remediation-webhook.remediation.svc.cluster.local:8080/webhook/trivy"
   destination:

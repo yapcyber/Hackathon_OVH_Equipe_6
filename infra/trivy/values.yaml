@@ -1,6 +1,10 @@
 # Référence : consommé par infra/argocd/applications/trivy-operator.yaml
 trivy:
-  ignoreUnfixed: false
+  # true : ne pas solliciter l'IA (ni ouvrir de PR) pour des CVE sans
+  # correctif disponible — un ai_remediation_job_outcomes_total{outcome=
+  # "pr_error"/"invalid_yaml"} garanti sur une CVE qu'on ne peut de toute
+  # façon pas corriger n'apporte rien, juste du bruit et un coût d'appel IA.
+  ignoreUnfixed: true
   severity: "CRITICAL,HIGH"
 
 operator:

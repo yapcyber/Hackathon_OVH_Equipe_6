@@ -9,7 +9,6 @@ draft sur le dépôt GitOps et s'arrête. Le token utilisé (GIT_PR_TOKEN) doit
 import os
 import subprocess
 import tempfile
-import time
 from pathlib import Path
 
 import httpx
@@ -31,6 +30,25 @@ KNOWN_REMEDIATION_TARGETS = {
 }
 
 
+def _find_existing_pr(branch: str) -> str | None:
+    """Idempotence : un retry K8s (backoffLimit) sur la même alerte réutilise
+    le même fingerprint donc la même branche. Si une PR ouverte existe déjà
+    pour cette branche, on la retourne au lieu d'en ouvrir une deuxième."""
+    owner = GITHUB_REPO_SLUG.split("/")[0]
+    resp = httpx.get(
+        f"{GITHUB_API_URL}/repos/{GITHUB_REPO_SLUG}/pulls",
+        headers={
+            "Authorization": f"Bearer {GIT_PR_TOKEN}",
+            "Accept": "application/vnd.github+json",
+        },
+        params={"head": f"{owner}:{branch}", "state": "open"},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    results = resp.json()
+    return results[0]["html_url"] if results else None
+
+
 def open_remediation_pr(
     alert_source: str,
     fingerprint: str,
@@ -47,6 +65,10 @@ def open_remediation_pr(
         )
 
     branch = f"ai-remediation/{alert_source}-{fingerprint}"
+
+    existing_pr = _find_existing_pr(branch)
+    if existing_pr:
+        return existing_pr
 
     with tempfile.TemporaryDirectory() as tmp:
         repo_dir = Path(tmp) / "repo"
@@ -67,7 +89,12 @@ def open_remediation_pr(
              f"fix({alert_source}): correctif proposé par IA pour {fingerprint}"],
             check=True,
         )
-        subprocess.run(["git", "-C", str(repo_dir), "push", "origin", branch], check=True)
+        # --force : cette branche est exclusivement créée/possédée par ce bot
+        # (préfixe ai-remediation/*, jamais touchée par un humain) — un retry
+        # sur la même alerte doit pouvoir écraser une tentative précédente
+        # avortée avant l'ouverture de la PR (sinon le push échoue en
+        # non-fast-forward et le Job reste bloqué en échec indéfiniment).
+        subprocess.run(["git", "-C", str(repo_dir), "push", "--force", "origin", branch], check=True)
 
     pr_body = (
         f"### Correctif généré automatiquement (source: `{alert_source}`)\n\n"

@@ -10,6 +10,8 @@ import re
 import sys
 import time
 
+import yaml
+
 from job_runner import enrichment, metrics, validation
 from job_runner.ai_client import AIEndpointsClient
 from job_runner.pr_generator import open_remediation_pr
@@ -17,12 +19,27 @@ from job_runner.pr_generator import open_remediation_pr
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("remediation-job")
 
+# Tolérant sur l'étiquette de langage (```yaml, ```yml, ```YAML, ou même nue
+# ``` sans étiquette) : certains modèles varient la casse ou l'omettent.
+_FENCE_RE = re.compile(r"```(?:ya?ml)?[ \t]*\n(.*?)```", re.DOTALL | re.IGNORECASE)
+
 
 def _extract_yaml_block(ai_response: str) -> str:
-    match = re.search(r"```ya?ml\n(.*?)```", ai_response, re.DOTALL)
-    if not match:
-        raise ValueError("Aucun bloc YAML trouvé dans la réponse IA — PR non générée.")
-    return match.group(1).strip()
+    """Prend le premier bloc de code qui parse comme un manifeste Kubernetes
+    valide (dict avec une clé 'kind'), pas juste le tout premier bloc de code
+    de la réponse — l'IA peut placer une note ou un extrait non-YAML avant."""
+    for candidate in _FENCE_RE.findall(ai_response):
+        text = candidate.strip()
+        try:
+            parsed = yaml.safe_load(text)
+        except yaml.YAMLError:
+            continue
+        if isinstance(parsed, dict) and "kind" in parsed:
+            return text
+    raise ValueError(
+        "Aucun bloc de code contenant un manifeste Kubernetes valide (avec 'kind') "
+        "trouvé dans la réponse IA — PR non générée."
+    )
 
 
 def _resolve_target(source: str, payload: dict) -> tuple[str, str, str]:

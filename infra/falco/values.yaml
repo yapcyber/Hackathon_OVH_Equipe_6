@@ -1,7 +1,13 @@
 # Référence : consommé par infra/argocd/applications/falco.yaml (valuesObject inline).
 # Conservé ici comme documentation / valeurs de secours pour un déploiement Helm manuel.
 driver:
-  kind: ebpf
+  kind: modern_ebpf
+  modernEbpf:
+    # Remplace securityContext.privileged: true par des capabilities Linux
+    # ciblées (BPF, SYS_RESOURCE, PERFMON, SYS_PTRACE) — nécessaire pour que
+    # Falco reste conforme à sa propre ClusterPolicy disallow-privileged-containers
+    # (voir docs/DOSSIER_TECHNIQUE.md §6.3, incident déjà rencontré).
+    leastPrivileged: true
 
 falcosidekick:
   enabled: true

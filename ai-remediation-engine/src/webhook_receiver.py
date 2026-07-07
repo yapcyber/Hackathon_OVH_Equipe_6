@@ -59,15 +59,47 @@ DEDUP_TTL_SECONDS = int(os.environ.get("DEDUP_TTL_SECONDS", "300"))
 WATCHED_NAMESPACE = os.environ.get("WATCHED_NAMESPACE", "demo")
 IGNORED_NAMESPACES = {"remediation", "kube-system", "argocd", "kyverno", "trivy-system", "monitoring", "falco"}
 
+# Durcissement optionnel : si configuré (Secret `webhook-shared-token`, voir
+# k8s/secrets.example.yaml), exige un header `X-Webhook-Token` sur /webhook/*.
+# Volontairement optionnel (le pipeline doit continuer à fonctionner tel quel
+# tant que ce secret n'a pas été créé et le header câblé côté Falcosidekick/
+# Trivy Operator — voir README pour l'activer réellement).
+WEBHOOK_SHARED_TOKEN = os.environ.get("WEBHOOK_SHARED_TOKEN")
+
 app = FastAPI()
 _recent_fingerprints: dict[str, float] = {}
 
-try:
-    config.load_incluster_config()
-except config.ConfigException:
-    config.load_kube_config()
+_batch_v1: client.BatchV1Api | None = None
 
-batch_v1 = client.BatchV1Api()
+
+def _get_batch_v1() -> client.BatchV1Api:
+    """Chargement paresseux (pas au moment de l'import) : permet d'importer
+    et tester ce module sans configuration Kubernetes disponible."""
+    global _batch_v1
+    if _batch_v1 is None:
+        try:
+            config.load_incluster_config()
+        except config.ConfigException:
+            config.load_kube_config()
+        _batch_v1 = client.BatchV1Api()
+    return _batch_v1
+
+
+def _check_webhook_auth(request: Request) -> Response | None:
+    if not WEBHOOK_SHARED_TOKEN:
+        return None
+    if request.headers.get("X-Webhook-Token") != WEBHOOK_SHARED_TOKEN:
+        return Response(status_code=401, content="unauthorized")
+    return None
+
+
+if not WEBHOOK_SHARED_TOKEN:
+    log.warning(
+        "WEBHOOK_SHARED_TOKEN non configuré : /webhook/* accepte tout POST "
+        "atteignant le Service sans authentification applicative (la "
+        "NetworkPolicy reste la défense primaire, voir k8s/networkpolicy.yaml). "
+        "Voir README pour activer l'authentification par secret partagé."
+    )
 
 
 def _fingerprint(source: str, payload: dict) -> str:
@@ -106,11 +138,30 @@ def _create_remediation_job(source: str, fp: str, payload: dict) -> str:
                 spec=client.V1PodSpec(
                     service_account_name="ai-remediation-job",
                     restart_policy="Never",
+                    security_context=client.V1PodSecurityContext(
+                        run_as_non_root=True,
+                        run_as_user=1000,
+                    ),
+                    volumes=[
+                        # git clone / kubeconform écrivent dans /tmp : nécessaire
+                        # avec readOnlyRootFilesystem: true ci-dessous.
+                        client.V1Volume(name="tmp", empty_dir=client.V1EmptyDirVolumeSource()),
+                    ],
                     containers=[
                         client.V1Container(
                             name="remediate",
                             image=JOB_IMAGE,
                             command=["python", "-m", "job_runner.main"],
+                            security_context=client.V1SecurityContext(
+                                allow_privilege_escalation=False,
+                                privileged=False,
+                                read_only_root_filesystem=True,
+                                run_as_non_root=True,
+                                run_as_user=1000,
+                            ),
+                            volume_mounts=[
+                                client.V1VolumeMount(name="tmp", mount_path="/tmp"),
+                            ],
                             env=[
                                 client.V1EnvVar(name="ALERT_SOURCE", value=source),
                                 client.V1EnvVar(name="ALERT_PAYLOAD", value=json.dumps(payload)),
@@ -150,12 +201,14 @@ def _create_remediation_job(source: str, fp: str, payload: dict) -> str:
             ),
         ),
     )
-    batch_v1.create_namespaced_job(namespace=NAMESPACE, body=job)
+    _get_batch_v1().create_namespaced_job(namespace=NAMESPACE, body=job)
     return job_name
 
 
 @app.post("/webhook/falco")
 async def falco_webhook(request: Request):
+    if (unauthorized := _check_webhook_auth(request)) is not None:
+        return unauthorized
     payload = await request.json()
     ALERTS_RECEIVED.labels(source="falco").inc()
     ns = payload.get("output_fields", {}).get("k8s.ns.name")
@@ -174,6 +227,8 @@ async def falco_webhook(request: Request):
 
 @app.post("/webhook/trivy")
 async def trivy_webhook(request: Request):
+    if (unauthorized := _check_webhook_auth(request)) is not None:
+        return unauthorized
     payload = await request.json()
     ALERTS_RECEIVED.labels(source="trivy").inc()
     if payload.get("kind") != "VulnerabilityReport":

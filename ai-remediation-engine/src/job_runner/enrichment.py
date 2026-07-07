@@ -41,16 +41,18 @@ def resolve_owning_deployment(namespace: str, pod_name: str) -> str:
     """Falco ne donne que le nom du Pod. Remonte Pod -> ReplicaSet -> Deployment
     (lecture seule, même RBAC que fetch_target_manifest) pour retrouver la
     ressource GitOps réellement gérée dans le dépôt. Retombe sur le nom du Pod
-    si la remontée échoue (Pod nu, non géré par un Deployment)."""
+    si la remontée échoue pour N'IMPORTE QUELLE raison (Pod nu non géré par un
+    Deployment, config cluster indisponible, RBAC insuffisant, etc.) : cette
+    fonction ne doit jamais faire échouer le pipeline, juste dégrader le nom résolu."""
     try:
-        config.load_incluster_config()
-    except config.ConfigException:
-        config.load_kube_config()
+        try:
+            config.load_incluster_config()
+        except config.ConfigException:
+            config.load_kube_config()
 
-    core_v1 = client.CoreV1Api()
-    apps_v1 = client.AppsV1Api()
+        core_v1 = client.CoreV1Api()
+        apps_v1 = client.AppsV1Api()
 
-    try:
         pod = core_v1.read_namespaced_pod(pod_name, namespace)
         for owner in pod.metadata.owner_references or []:
             if owner.kind == "ReplicaSet":

@@ -1,0 +1,34 @@
+# Défense primaire pour /webhook/* (l'authentification applicative par
+# secret partagé est optionnelle, voir webhook_receiver.py et README).
+# Dès qu'une NetworkPolicy sélectionne un Pod pour l'Ingress, tout trafic non
+# explicitement autorisé est refusé pour ce Pod (comportement natif K8s) —
+# donc ceci referme aussi l'accès qui n'a jamais été nécessaire depuis
+# n'importe quel autre namespace du cluster.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ai-remediation-webhook-ingress
+  namespace: remediation
+spec:
+  podSelector:
+    matchLabels:
+      app: ai-remediation-webhook
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        # Falcosidekick (alertes runtime)
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: falco
+        # Trivy Operator (webhookBroadcastURL)
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: trivy-system
+        # Prometheus (scrape /metrics via k8s/servicemonitor.yaml)
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 8080

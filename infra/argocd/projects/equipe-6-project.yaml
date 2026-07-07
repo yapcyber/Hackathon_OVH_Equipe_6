@@ -11,17 +11,39 @@ spec:
     - "https://falcosecurity.github.io/charts"
     - "https://aquasecurity.github.io/helm-charts/"
     - "https://prometheus-community.github.io/helm-charts"
+  # Liste explicite plutôt que "*" : ce sont les 7 namespaces réellement
+  # utilisés par nos 8 Applications (grep namespace: infra/argocd/applications/).
+  # Empêche ce projet de déployer dans un namespace non prévu (ex: kube-system)
+  # même si une future Application mal configurée essayait.
   destinations:
-    - namespace: "*"
+    - namespace: argocd
       server: "https://kubernetes.default.svc"
+    - namespace: kyverno
+      server: "https://kubernetes.default.svc"
+    - namespace: falco
+      server: "https://kubernetes.default.svc"
+    - namespace: trivy-system
+      server: "https://kubernetes.default.svc"
+    - namespace: monitoring
+      server: "https://kubernetes.default.svc"
+    - namespace: remediation
+      server: "https://kubernetes.default.svc"
+    - namespace: demo
+      server: "https://kubernetes.default.svc"
+  # clusterResourceWhitelist/namespaceResourceWhitelist restent en "*" :
+  # les 3 charts Helm tiers (Kyverno, Falco, kube-prometheus-stack) installent
+  # collectivement des dizaines de CRD (ServiceMonitor, PrometheusRule,
+  # ClusterPolicy, PolicyException, etc.) qu'on ne peut pas énumérer de façon
+  # fiable sans risquer de casser un sync en pleine démo. Dette technique
+  # assumée (voir docs/DOSSIER_TECHNIQUE.md §8) — le vrai périmètre de
+  # confiance vient du sourceRepos whitelist ci-dessus et des destinations
+  # ci-dessus, pas d'une restriction par kind.
   clusterResourceWhitelist:
     - group: "*"
       kind: "*"
   namespaceResourceWhitelist:
     - group: "*"
       kind: "*"
-  # Aucune Application de ce projet ne peut activer le "self-heal" agressif
-  # sur les namespaces critiques sans revue explicite du diff dans Argo CD UI.
   roles:
     - name: readonly
       description: "Lecture seule pour la démo / jury"

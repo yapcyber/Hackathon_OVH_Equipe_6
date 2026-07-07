@@ -136,6 +136,13 @@ Le webhook ignore systématiquement :
 
 Déduplication : fingerprint SHA-256 sur `rule` (Falco) ou `metadata.name` (Trivy), fenêtre de 300s, pour éviter un Job par répétition de la même alerte.
 
+### 4.4 Robustesse : idempotence, retry, tests automatisés
+
+- **Idempotence des PR** : un retry Kubernetes (`backoffLimit: 2`) réutilise le même `FINGERPRINT` (propagé par le webhook, pas recalculé depuis `HOSTNAME`) donc la même branche `ai-remediation/<source>-<fingerprint>`. Avant tout `git clone`, `pr_generator.py` interroge l'API GitHub (`GET /pulls?head=...&state=open`) : si une PR est déjà ouverte pour cette branche, elle est retournée telle quelle — aucun nouveau clone/commit/push. Le `push` final utilise `--force` (branche exclusivement possédée par le bot, jamais touchée par un humain) pour absorber une tentative précédente avortée avant l'ouverture de la PR.
+- **Retry sur l'appel IA** : `ai_client.py` retente automatiquement (backoff exponentiel, 3 tentatives par défaut) sur `429` et `5xx` — jamais sur les erreurs `4xx` (une erreur de requête ne se résout pas en réessayant).
+- **Parsing tolérant de la réponse IA** : `_extract_yaml_block` (main.py) ne prend plus aveuglément le premier bloc de code de la réponse — il prend le premier bloc qui parse comme un manifeste Kubernetes valide (dict avec une clé `kind`), tolérant sur la casse/présence de l'étiquette de langage (` ```yaml `, ` ```yml `, ` ```YAML `, ou nue).
+- **Tests unitaires** (`ai-remediation-engine/tests/`, 29 tests, `pytest`) : fingerprint/déduplication, authentification webhook, extraction du bloc YAML, résolution namespace/name/kind par source, fallback de `resolve_owning_deployment`, idempotence de `pr_generator`, retry de `ai_client`. Aucun test ne touche un vrai cluster ou le réseau (mocks `httpx.MockTransport`, monkeypatching).
+
 ---
 
 ## 5. Garanties de sécurité (Livrable 4)
@@ -150,6 +157,11 @@ Déduplication : fingerprint SHA-256 sur `rule` (Falco) ou `metadata.name` (Triv
 | Policy Kyverno de base | `disallow-privileged-containers` en `Enforce`, testée en direct |
 | PR jamais ouverte si YAML invalide | `kubeconform -strict` en local dans le `Job` (§4.2) — sans étendre le RBAC read-only |
 | Défauts connus du workload audités | 4 policies Kyverno Audit (`disallow-latest-tag`, `disallow-host-path`, `require-run-as-nonroot`, `require-resource-limits`) |
+| Jobs et webhook durcis | `securityContext` complet (non-root, `allowPrivilegeEscalation: false`, `readOnlyRootFilesystem: true`) sur le webhook **et** les Jobs (`/tmp` en `emptyDir` pour `git clone`/`kubeconform`) |
+| Accès réseau au webhook restreint | `NetworkPolicy` : seuls `falco`, `trivy-system` (alertes) et `monitoring` (scrape `/metrics`) peuvent atteindre le webhook — tout le reste du cluster est refusé par défaut dès qu'une `NetworkPolicy` sélectionne le Pod |
+| Authentification applicative optionnelle | Secret partagé (`WEBHOOK_SHARED_TOKEN`, header `X-Webhook-Token`) — désactivée par défaut tant que le secret n'est pas créé et câblé côté Falcosidekick/Trivy Operator (voir README), pour ne jamais casser le pipeline existant |
+| Périmètre Argo CD resserré | `AppProject.destinations` énumère les 7 namespaces réellement utilisés (plus de `namespace: "*"`) |
+| Régression Kyverno testée en CI | `kyverno apply` contre `vulnerable-demo` doit rester à `pass: 2, fail: 4` — la CI échoue si une policy casse silencieusement |
 
 ---
 
@@ -195,9 +207,29 @@ Test de bout en bout exécuté sur le cluster réel (pas un mock) :
 
 - Les CronJobs internes `kyverno-cleanup-*` (fournis par le chart Kyverno lui-même, pas notre code) restent en `ImagePullBackOff` — n'affecte pas le fonctionnement de la policy engine (`ClusterPolicy` reste `Ready`/`Enforce`).
 - 5 `ClusterPolicy` livrées (§2.2) — extensible plus loin (ex: `disallow-capabilities`, `require-non-root-group`, etc.), mais couvre déjà les 4 défauts volontaires de `vulnerable-demo`.
+- **Secrets K8s en clair (pas de External Secrets Operator)** : `ai-endpoints-credentials`, `git-pr-credentials`, `webhook-shared-token` restent des `Secret` Kubernetes classiques (base64, pas chiffrés), créés hors GitOps via `kubectl create secret`. ESO a été explicitement envisagé (§ punch-list P4) mais **non implémenté** : brancher un `SecretStore` ESO nécessite un backend externe réel (Vault, un coffre géré OVHcloud, etc.) que l'équipe n'a pas provisionné pendant le hackathon — déployer une Application ESO pointant vers un backend inexistant aurait été un manifeste qui ne synchronise jamais, donc pire qu'assumer la dette explicitement. Décision consciente : mieux vaut un `Secret` en clair documenté que de la fausse conformité GitOps.
+- **`clusterResourceWhitelist`/`namespaceResourceWhitelist` de l'`AppProject` restent en `"*" "*"`** (voir `infra/argocd/projects/equipe-6-project.yaml`) : les 3 charts Helm tiers installent collectivement des dizaines de CRD (ServiceMonitor, PrometheusRule, Probe, ClusterPolicy, PolicyException, Alertmanager, ThanosRuler...) qu'on ne peut pas énumérer de façon fiable sans risquer de casser un sync la veille d'une démo. En contrepartie, `sourceRepos` (5 sources exactes) et `destinations` (7 namespaces exacts, plus de `"*"`) sont, eux, resserrés.
+- **Authentification applicative du webhook optionnelle, pas activée par défaut** : le code (`WEBHOOK_SHARED_TOKEN`) et le `Secret` template existent, mais câbler la même valeur côté Falcosidekick/Trivy Operator est une étape manuelle documentée (README), volontairement hors GitOps pour ne jamais committer ce secret en clair dans une `Application`. La défense réellement active par défaut est la `NetworkPolicy` (§5).
+- **Image du moteur toujours taguée `:latest`** (`webhook-deployment.yaml`, `JOB_IMAGE`) : la CI (`.github/workflows/ci.yml`) pousse maintenant systématiquement un tag immuable `sha-<commit>` en plus de `:latest`, mais le passage des manifestes à ce tag est un changement manuel restant (`:latest` fonctionne déjà et casser cette référence la veille d'une démo était jugé plus risqué que de le laisser tel quel pour l'instant).
+- **Déduplication du webhook non persistante** : `_recent_fingerprints` est un `dict` en mémoire du process — perdu au redémarrage du Pod, et ne fonctionnerait pas avec plusieurs replicas (`replicas: 1` actuellement, donc non-problématique en l'état). Un Redis ou une `ConfigMap` partagée serait la vraie solution HA, non justifiée pour une démo mono-replica.
 
 ---
 
 ## 9. Comment rejouer la démo
 
 Voir `docs/demo-runbook.sh` — script bash interactif, 6 phases (GitOps → Kyverno → Trivy → Falco → Prometheus → boucle IA complète), pensé pour être exécuté en direct devant le jury avec des pauses commentées à chaque étape.
+
+---
+
+## 10. CI et validation continue
+
+`.github/workflows/ci.yml`, 4 jobs, exécutés à chaque push/PR sur `main` :
+
+| Job | Ce qu'il vérifie |
+|---|---|
+| `unit-tests` | `pytest` sur `ai-remediation-engine/tests/` (29 tests, §4.4) |
+| `validate-manifests` | `kubectl kustomize` + `kubeconform -strict` sur les deux Kustomization (`ai-remediation-engine/k8s`, `apps/vulnerable-demo`) et sur les manifestes bruts (Applications Argo CD, AppProject, ClusterPolicy Kyverno, dashboards Grafana) — schémas CRD via le catalogue communautaire `datreeio/CRDs-catalog` |
+| `kyverno-policy-regression` | `kyverno apply` contre `vulnerable-demo` doit rester exactement à `pass: 2, fail: 4` — détecte une policy cassée silencieusement ou un `vulnerable-demo` "corrigé" sans mise à jour du test |
+| `build-and-push` | Build + push `ghcr.io/.../ai-remediation-engine:latest` et `:sha-<commit>`, uniquement sur push vers `main`, après succès des 3 jobs précédents |
+
+Chaque étape de cette CI a été validée manuellement en amont (pas juste écrite en espérant que ça marche) : build Docker réel, `pytest` réellement exécuté (29/29 passés), `kubeconform`/`kyverno apply` réellement lancés contre les manifestes du repo.
