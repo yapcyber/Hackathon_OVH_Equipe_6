@@ -24,22 +24,40 @@ def _extract_yaml_block(ai_response: str) -> str:
     return match.group(1).strip()
 
 
+def _resolve_target(source: str, payload: dict) -> tuple[str, str, str]:
+    """Namespace/name/kind réels de la ressource visée, selon le format propre
+    à chaque source d'alerte (Falco: output_fields, Trivy: labels du CR
+    VulnerabilityReport)."""
+    if source == "falco":
+        fields = payload.get("output_fields", {})
+        ns = fields.get("k8s.ns.name", "demo")
+        pod_name = fields.get("k8s.pod.name", "")
+        name = enrichment.resolve_owning_deployment(ns, pod_name) if pod_name else "vulnerable-demo"
+        return ns, name, "Deployment"
+
+    # trivy
+    labels = payload.get("metadata", {}).get("labels", {})
+    ns = labels.get("trivy-operator.resource.namespace", "demo")
+    name = labels.get("trivy-operator.resource.name", "vulnerable-demo")
+    kind = labels.get("trivy-operator.resource.kind", "Deployment")
+    return ns, name, kind
+
+
 def main() -> int:
     source = os.environ["ALERT_SOURCE"]
     raw_payload = os.environ["ALERT_PAYLOAD"]
-    fingerprint = os.environ.get("HOSTNAME", "unknown")[-16:]
+    fingerprint = os.environ.get("FINGERPRINT") or os.environ.get("HOSTNAME", "unknown")[-16:]
 
     alert = enrichment.load_alert(source, raw_payload)
+    ns, name, kind = _resolve_target(source, alert["payload"])
 
     manifest = None
     try:
-        ns = alert["payload"].get("namespace", "demo")
-        name = alert["payload"].get("name", "vulnerable-demo")
-        manifest = enrichment.fetch_target_manifest(ns, "Deployment", name)
+        manifest = enrichment.fetch_target_manifest(ns, kind, name)
     except Exception as exc:  # lecture best-effort, ne bloque pas le pipeline
         log.warning("Impossible de récupérer le manifeste cible: %s", exc)
 
-    prompt = enrichment.build_prompt(alert, manifest)
+    prompt = enrichment.build_prompt(alert, manifest, kind)
 
     client = AIEndpointsClient()
     ai_response = client.generate_remediation(prompt)
@@ -50,6 +68,8 @@ def main() -> int:
     pr_url = open_remediation_pr(
         alert_source=source,
         fingerprint=fingerprint,
+        namespace=ns,
+        name=name,
         patch_yaml=patch_yaml,
         explanation=ai_response,
     )

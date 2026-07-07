@@ -27,6 +27,8 @@ def fetch_target_manifest(namespace: str, kind: str, name: str) -> dict:
 
     if kind.lower() == "deployment":
         obj = apps_v1.read_namespaced_deployment(name, namespace)
+    elif kind.lower() == "replicaset":
+        obj = apps_v1.read_namespaced_replica_set(name, namespace)
     elif kind.lower() == "pod":
         obj = core_v1.read_namespaced_pod(name, namespace)
     else:
@@ -35,7 +37,33 @@ def fetch_target_manifest(namespace: str, kind: str, name: str) -> dict:
     return client.ApiClient().sanitize_for_serialization(obj)
 
 
-def build_prompt(alert: dict, manifest: dict | None) -> str:
+def resolve_owning_deployment(namespace: str, pod_name: str) -> str:
+    """Falco ne donne que le nom du Pod. Remonte Pod -> ReplicaSet -> Deployment
+    (lecture seule, même RBAC que fetch_target_manifest) pour retrouver la
+    ressource GitOps réellement gérée dans le dépôt. Retombe sur le nom du Pod
+    si la remontée échoue (Pod nu, non géré par un Deployment)."""
+    try:
+        config.load_incluster_config()
+    except config.ConfigException:
+        config.load_kube_config()
+
+    core_v1 = client.CoreV1Api()
+    apps_v1 = client.AppsV1Api()
+
+    try:
+        pod = core_v1.read_namespaced_pod(pod_name, namespace)
+        for owner in pod.metadata.owner_references or []:
+            if owner.kind == "ReplicaSet":
+                rs = apps_v1.read_namespaced_replica_set(owner.name, namespace)
+                for rs_owner in rs.metadata.owner_references or []:
+                    if rs_owner.kind == "Deployment":
+                        return rs_owner.name
+    except Exception:
+        pass
+    return pod_name
+
+
+def build_prompt(alert: dict, manifest: dict | None, kind: str = "Deployment") -> str:
     source = alert["source"]
     payload = alert["payload"]
 
@@ -45,10 +73,13 @@ def build_prompt(alert: dict, manifest: dict | None) -> str:
             f"Priorité: {payload.get('priority')}\n"
             f"Détails: {payload.get('output')}\n"
         )
-    else:  # trivy
+    else:  # trivy: les données utiles sont sous report.* d'un VulnerabilityReport
+        report = payload.get("report", {})
+        artifact = report.get("artifact", {})
+        image = f"{artifact.get('repository', '?')}:{artifact.get('tag', '?')}"
         finding = (
-            f"Vulnérabilité(s) Trivy sur l'image {payload.get('image', {}).get('name')}:\n"
-            f"{json.dumps(payload.get('vulnerabilities', payload), indent=2)[:4000]}\n"
+            f"Vulnérabilité(s) Trivy sur l'image {image}:\n"
+            f"{json.dumps(report.get('vulnerabilities', report), indent=2)[:4000]}\n"
         )
 
     manifest_block = (
@@ -63,10 +94,15 @@ en production sur un cluster Managed Kubernetes OVHcloud.
 {finding}
 {manifest_block}
 
-Propose UNIQUEMENT :
-1. Un correctif au format patch YAML (diff minimal, pas de réécriture complète).
-2. Une explication courte (3 lignes max) de la cause racine.
-3. Si pertinent, une ClusterPolicy Kyverno complémentaire pour prévenir la récidive.
+Propose UNIQUEMENT, dans cet ordre :
+1. Dans le TOUT PREMIER bloc de code ```yaml de ta réponse : le manifeste
+   {kind} COMPLET et corrigé (pas un diff partiel). Ce bloc va remplacer
+   intégralement le fichier existant dans le dépôt GitOps — il doit donc
+   rester un objet Kubernetes valide et complet (apiVersion/kind/metadata/spec),
+   pas seulement le fragment corrigé.
+2. Une explication courte (3 lignes max) de la cause racine, en dehors du bloc YAML.
+3. Si pertinent, une ClusterPolicy Kyverno complémentaire pour prévenir la
+   récidive, dans un bloc ```yaml SÉPARÉ, placé APRÈS le manifeste corrigé.
 
 Ne propose jamais une commande à exécuter directement sur le cluster :
 le correctif doit uniquement prendre la forme d'un fichier YAML à committer

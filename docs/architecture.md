@@ -28,9 +28,8 @@ sequenceDiagram
     activate Job
     Job->>Job: Enrichissement (contexte K8s, manifeste, CVE, règle Falco)
     Job->>AI: POST /chat/completions (Bearer token)
-    AI-->>Job: Correctif proposé (diff YAML + explication)
-    Job->>Job: Validation syntaxique (kubeconform/kyverno test dry-run)
-    Job->>Git: Création branche + commit correctif
+    AI-->>Job: Manifeste corrigé complet (YAML) + explication
+    Job->>Git: Écrase le fichier existant (cible whitelistée) + commit
     Job->>Git: Ouverture Pull Request (draft)
     deactivate Job
 

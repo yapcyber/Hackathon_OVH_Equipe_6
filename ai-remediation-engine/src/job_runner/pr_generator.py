@@ -19,8 +19,33 @@ GIT_PR_TOKEN = os.environ["GIT_PR_TOKEN"]
 GITHUB_API_URL = os.environ.get("GITHUB_API_URL", "https://api.github.com")
 GITHUB_REPO_SLUG = os.environ["GITHUB_REPO_SLUG"]  # ex: yapcyber/Hackathon_OVH_Equipe_6
 
+# Cibles de remédiation connues et autorisées (namespace, name) -> chemin du
+# manifeste dans le dépôt GitOps. Volontairement une whitelist explicite :
+# le namespace/name viennent d'un payload Falco/Trivy non maîtrisé, on ne
+# construit jamais un chemin de fichier directement à partir de ces valeurs
+# (pas de traversée de chemin possible, pas d'écriture hors périmètre connu).
+# Le fichier ciblé doit déjà être listé dans le kustomization.yaml de l'app :
+# on écrase un fichier existant suivi par Argo CD, jamais un fichier orphelin.
+KNOWN_REMEDIATION_TARGETS = {
+    ("demo", "vulnerable-demo"): "apps/vulnerable-demo/deployment.yaml",
+}
 
-def open_remediation_pr(alert_source: str, fingerprint: str, patch_yaml: str, explanation: str) -> str:
+
+def open_remediation_pr(
+    alert_source: str,
+    fingerprint: str,
+    namespace: str,
+    name: str,
+    patch_yaml: str,
+    explanation: str,
+) -> str:
+    target_rel_path = KNOWN_REMEDIATION_TARGETS.get((namespace, name))
+    if target_rel_path is None:
+        raise ValueError(
+            f"Cible de remédiation inconnue ({namespace}/{name}) — PR non ouverte. "
+            "Ajouter l'entrée à KNOWN_REMEDIATION_TARGETS si cette cible est légitime."
+        )
+
     branch = f"ai-remediation/{alert_source}-{fingerprint}"
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -30,10 +55,12 @@ def open_remediation_pr(alert_source: str, fingerprint: str, patch_yaml: str, ex
         subprocess.run(["git", "clone", "--depth", "1", authed_url, str(repo_dir)], check=True)
         subprocess.run(["git", "-C", str(repo_dir), "checkout", "-b", branch], check=True)
 
-        patch_path = repo_dir / "apps" / "vulnerable-demo" / f"ai-fix-{fingerprint}.yaml"
-        patch_path.write_text(patch_yaml)
+        target_path = repo_dir / target_rel_path
+        if not target_path.is_file():
+            raise ValueError(f"Fichier cible attendu introuvable dans le repo: {target_rel_path}")
+        target_path.write_text(patch_yaml)
 
-        subprocess.run(["git", "-C", str(repo_dir), "add", str(patch_path)], check=True)
+        subprocess.run(["git", "-C", str(repo_dir), "add", str(target_path)], check=True)
         subprocess.run(
             ["git", "-C", str(repo_dir), "-c", "user.email=ai-remediation-bot@equipe6.local",
              "-c", "user.name=ai-remediation-bot", "commit", "-m",

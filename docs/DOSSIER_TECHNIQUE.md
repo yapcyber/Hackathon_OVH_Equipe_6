@@ -90,10 +90,12 @@ Justification de cette séparation :
 
 ### 4.2 Pipeline exact d'un Job de remédiation
 
-1. **`enrichment.py`** : parse le payload JSON de l'alerte (Falco ou Trivy), va lire (lecture seule, RBAC dédié) le manifeste K8s de la ressource concernée pour donner du contexte, construit un prompt structuré.
-2. **`ai_client.py`** : `POST https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions` avec le modèle `Meta-Llama-3_3-70B-Instruct`, `temperature: 0.2` (réponses reproductibles, pas créatives), prompt système qui interdit explicitement à l'IA de proposer une commande à exécuter directement — uniquement un patch YAML.
-3. **`main.py`** : extrait le bloc YAML de la réponse IA (regex sur les fences ` ```yaml `).
-4. **`pr_generator.py`** : clone le repo (`git clone --depth 1`), crée une branche `ai-remediation/<source>-<fingerprint>`, commit le patch proposé, **push**, puis appelle l'API GitHub `POST /repos/.../pulls` avec **`draft: true`**.
+1. **`enrichment.py`** : parse le payload JSON de l'alerte (Falco ou Trivy), résout le namespace/name/kind **réel** de la ressource visée (Falco : `output_fields` puis remontée Pod → ReplicaSet → Deployment ; Trivy : labels `trivy-operator.resource.*` du CR `VulnerabilityReport`), va lire (lecture seule, RBAC dédié) le manifeste K8s correspondant pour donner du contexte, construit un prompt structuré.
+2. **`ai_client.py`** : `POST https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions` avec le modèle `Meta-Llama-3_3-70B-Instruct`, `temperature: 0.2` (réponses reproductibles, pas créatives), prompt système qui interdit explicitement à l'IA de proposer une commande à exécuter directement — l'IA doit renvoyer le **manifeste YAML complet et corrigé** (pas un diff partiel), dans le tout premier bloc ` ```yaml ` de sa réponse.
+3. **`main.py`** : extrait ce premier bloc YAML de la réponse IA (regex sur les fences ` ```yaml `).
+4. **`pr_generator.py`** : clone le repo (`git clone --depth 1`), crée une branche `ai-remediation/<source>-<fingerprint>`, **écrase le fichier GitOps existant** correspondant à la cible résolue en (1) — cible vérifiée contre une whitelist explicite `KNOWN_REMEDIATION_TARGETS` (namespace, name) → chemin, jamais dérivée directement du payload — commit, **push**, puis appelle l'API GitHub `POST /repos/.../pulls` avec **`draft: true`**.
+
+Le fichier écrasé est déjà référencé dans le `kustomization.yaml` de l'app GitOps concernée : après merge humain, Argo CD applique donc réellement le correctif au prochain sync (contrairement à une première version qui écrivait un fichier séparé jamais inclus dans les `resources:` de Kustomize — le correctif n'était alors jamais appliqué, seulement présent dans Git).
 
 ### 4.3 Filtrage anti-boucle (leçon apprise en production, voir incident §6.2)
 

@@ -88,6 +88,7 @@ def _create_remediation_job(source: str, fp: str, payload: dict) -> str:
                             env=[
                                 client.V1EnvVar(name="ALERT_SOURCE", value=source),
                                 client.V1EnvVar(name="ALERT_PAYLOAD", value=json.dumps(payload)),
+                                client.V1EnvVar(name="FINGERPRINT", value=fp),
                                 client.V1EnvVar(
                                     name="OVH_AI_ENDPOINTS_ACCESS_TOKEN",
                                     value_from=client.V1EnvVarSource(
