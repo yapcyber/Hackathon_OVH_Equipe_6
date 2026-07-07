@@ -50,14 +50,18 @@ jobs:
 
       - name: Valider les Kustomization (kustomize build + kubeconform)
         run: |
-          kubectl kustomize ai-remediation-engine/k8s | kubeconform -strict -summary
+          # -schema-location supplémentaire nécessaire ici aussi : le rendu de
+          # ai-remediation-engine/k8s contient un ServiceMonitor (CRD Prometheus
+          # Operator, monitoring.coreos.com), pas un type Kubernetes "core" —
+          # catalogue communautaire de schémas pour les CRD.
+          kubectl kustomize ai-remediation-engine/k8s | kubeconform -strict -summary \
+            -schema-location default \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
           kubectl kustomize apps/vulnerable-demo | kubeconform -strict -summary
 
       - name: Valider les manifestes bruts (Argo CD Application/AppProject, Kyverno ClusterPolicy, dashboards Grafana)
         run: |
-          # -schema-location supplémentaire : catalogue communautaire de schémas
-          # pour les CRD (Application/AppProject/ClusterPolicy ne sont pas des
-          # types Kubernetes "core", kubeconform ne les connaît pas nativement).
+          # Même raison : Application/AppProject/ClusterPolicy sont aussi des CRD.
           kubeconform -strict -summary \
             -schema-location default \
             -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \

@@ -30,7 +30,8 @@ Stack : Argo CD · Trivy Operator · Falco · Kyverno · Prometheus · OVHcloud 
 │   └── Dockerfile             # inclut kubeconform (validation locale des manifestes)
 └── docs/
     ├── architecture.md        # Diagramme de séquence (Mermaid)
-    └── DOSSIER_TECHNIQUE.md   # Choix d'outils (+ tableau statut CNCF), incidents, preuves, CI
+    ├── DOSSIER_TECHNIQUE.md   # Choix d'outils (+ tableau statut CNCF), incidents, preuves, CI
+    └── CONFIGURATION.md       # Inventaire : quel outil, quelle version, quelle config, où
 ```
 
-Voir `docs/architecture.md` pour le cycle de vie complet d'une faille (détection → PR → merge humain → sync Argo CD), et `docs/DOSSIER_TECHNIQUE.md` §2.0 pour le tableau récapitulatif du statut CNCF de chaque outil.
+Voir `docs/architecture.md` pour le cycle de vie complet d'une faille (détection → PR → merge humain → sync Argo CD), `docs/DOSSIER_TECHNIQUE.md` §2.0 pour le tableau récapitulatif du statut CNCF de chaque outil, et `docs/CONFIGURATION.md` pour la liste exhaustive des versions/configs déployées (référence rapide, pas de justification).
