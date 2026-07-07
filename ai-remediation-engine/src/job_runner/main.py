@@ -8,8 +8,9 @@ import logging
 import os
 import re
 import sys
+import time
 
-from job_runner import enrichment
+from job_runner import enrichment, metrics
 from job_runner.ai_client import AIEndpointsClient
 from job_runner.pr_generator import open_remediation_pr
 
@@ -59,20 +60,36 @@ def main() -> int:
 
     prompt = enrichment.build_prompt(alert, manifest, kind)
 
-    client = AIEndpointsClient()
-    ai_response = client.generate_remediation(prompt)
-    log.info("Réponse IA reçue (%d caractères)", len(ai_response))
+    ai_client = AIEndpointsClient()
+    started = time.monotonic()
+    try:
+        ai_response = ai_client.generate_remediation(prompt)
+    except Exception:
+        metrics.report(source, "ai_error")
+        raise
+    ai_call_seconds = time.monotonic() - started
+    log.info("Réponse IA reçue (%d caractères, %.1fs)", len(ai_response), ai_call_seconds)
 
-    patch_yaml = _extract_yaml_block(ai_response)
+    try:
+        patch_yaml = _extract_yaml_block(ai_response)
+    except ValueError:
+        metrics.report(source, "no_yaml_block", ai_call_seconds)
+        raise
 
-    pr_url = open_remediation_pr(
-        alert_source=source,
-        fingerprint=fingerprint,
-        namespace=ns,
-        name=name,
-        patch_yaml=patch_yaml,
-        explanation=ai_response,
-    )
+    try:
+        pr_url = open_remediation_pr(
+            alert_source=source,
+            fingerprint=fingerprint,
+            namespace=ns,
+            name=name,
+            patch_yaml=patch_yaml,
+            explanation=ai_response,
+        )
+    except Exception:
+        metrics.report(source, "pr_error", ai_call_seconds)
+        raise
+
+    metrics.report(source, "pr_opened", ai_call_seconds)
     log.info("Pull Request ouverte: %s", pr_url)
     return 0
 

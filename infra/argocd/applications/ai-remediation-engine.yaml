@@ -3,6 +3,12 @@ kind: Application
 metadata:
   name: ai-remediation-engine
   namespace: argocd
+  annotations:
+    # Le ServiceMonitor (k8s/servicemonitor.yaml) est un CRD fourni par
+    # kube-prometheus-stack : on force ce sync après celui de Prometheus
+    # (wave par défaut 0) pour éviter une erreur "no matches for kind
+    # ServiceMonitor" au premier bootstrap du cluster.
+    argocd.argoproj.io/sync-wave: "1"
 spec:
   project: equipe-6
   source:

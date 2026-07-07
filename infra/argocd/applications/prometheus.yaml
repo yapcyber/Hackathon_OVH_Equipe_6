@@ -11,6 +11,47 @@ spec:
     targetRevision: "62.5.1"
     helm:
       releaseName: prometheus
+      valuesObject:
+        prometheus:
+          prometheusSpec:
+            retention: 15d
+            # Sans ça, un ServiceMonitor sans label "release: prometheus"
+            # peut être ignoré selon la version du chart (comportement par
+            # défaut restrictif) — on le rend explicite plutôt que de
+            # dépendre du defaut du chart.
+            serviceMonitorSelectorNilUsesHelmValues: false
+        grafana:
+          enabled: true
+          defaultDashboardsEnabled: true
+          sidecar:
+            dashboards:
+              enabled: true
+              label: grafana_dashboard
+              labelValue: "1"
+          # Dashboards officiels importés depuis grafana.com par ID — pas de
+          # JSON à maintenir nous-mêmes pour Trivy/Falco.
+          dashboardProviders:
+            dashboardproviders.yaml:
+              apiVersion: 1
+              providers:
+                - name: default
+                  orgId: 1
+                  folder: ""
+                  type: file
+                  disableDeletion: false
+                  editable: true
+                  options:
+                    path: /var/lib/grafana/dashboards/default
+          dashboards:
+            default:
+              trivy-operator:
+                gnetId: 17813
+                revision: 1
+                datasource: Prometheus
+              falco:
+                gnetId: 11914
+                revision: 1
+                datasource: Prometheus
   destination:
     server: "https://kubernetes.default.svc"
     namespace: monitoring

@@ -8,12 +8,18 @@ sur le cluster.
 
 - `src/webhook_receiver.py` — Deployment stateless, reçoit Falcosidekick/Trivy,
   dédoublonne, crée un `Job` par alerte. RBAC : `create` sur `Jobs` uniquement.
+  Expose aussi `/metrics` (scrapé par `k8s/servicemonitor.yaml`) et un endpoint
+  interne `/internal/job-metrics` où les Jobs éphémères reportent leur résultat.
 - `src/job_runner/` — code exécuté par chaque `Job` éphémère :
-  - `enrichment.py` : lecture seule du manifeste K8s concerné + construction du prompt.
+  - `enrichment.py` : lecture seule du manifeste K8s concerné (résolution ns/name/kind
+    propre à chaque source) + construction du prompt.
   - `ai_client.py` : appel `POST {OVH_AI_ENDPOINTS_BASE_URL}/chat/completions` (`https://oai.endpoints.kepler.ai.cloud.ovh.net/v1` par défaut, compatible OpenAI)
     avec `Authorization: Bearer $OVH_AI_ENDPOINTS_ACCESS_TOKEN`.
-  - `pr_generator.py` : clone, commit sur une branche `ai-remediation/*`, ouvre une PR **draft**.
-  - `main.py` : orchestration des 3 étapes ci-dessus.
+  - `pr_generator.py` : clone, écrase le fichier GitOps existant de la cible (whitelist
+    `KNOWN_REMEDIATION_TARGETS`), commit sur une branche `ai-remediation/*`, ouvre une PR **draft**.
+  - `metrics.py` : reporting best-effort du résultat du Job au webhook (le Job
+    lui-même ne peut pas être scrapé, trop éphémère).
+  - `main.py` : orchestration des étapes ci-dessus.
 
 ## Secrets requis (non versionnés)
 

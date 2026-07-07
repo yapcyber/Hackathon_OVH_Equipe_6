@@ -19,7 +19,8 @@ spec:
           image: ghcr.io/yapcyber/ai-remediation-engine:latest
           command: ["python", "-m", "uvicorn", "webhook_receiver:app", "--host", "0.0.0.0", "--port", "8080"]
           ports:
-            - containerPort: 8080
+            - name: http
+              containerPort: 8080
           env:
             - name: NAMESPACE
               value: remediation
@@ -39,9 +40,12 @@ kind: Service
 metadata:
   name: ai-remediation-webhook
   namespace: remediation
+  labels:
+    app: ai-remediation-webhook
 spec:
   selector:
     app: ai-remediation-webhook
   ports:
-    - port: 8080
-      targetPort: 8080
+    - name: http
+      port: 8080
+      targetPort: http

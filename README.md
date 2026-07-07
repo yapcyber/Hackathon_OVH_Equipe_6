@@ -15,15 +15,20 @@ Stack : Argo CD · Trivy Operator · Falco · Kyverno · Prometheus · OVHcloud 
 │   ├── kyverno/policies/      # ClusterPolicy (policy-as-code)
 │   ├── falco/                 # values Falco + Falcosidekick
 │   ├── trivy/                 # values Trivy Operator
-│   └── prometheus/            # values kube-prometheus-stack
+│   └── prometheus/
+│       ├── values.yaml        # values kube-prometheus-stack (référence)
+│       └── dashboards/        # ConfigMaps Grafana (dashboard custom moteur IA)
 ├── apps/
 │   └── vulnerable-demo/       # Workload volontairement vulnérable (démo)
 ├── ai-remediation-engine/     # Moteur IA : webhook + Job d'enrichissement/PR
 │   ├── src/
-│   ├── k8s/
+│   │   ├── webhook_receiver.py    # Deployment : ingestion + métriques /metrics
+│   │   └── job_runner/            # Job éphémère : enrichissement/IA/PR/metrics
+│   ├── k8s/                   # RBAC, Deployment, ServiceMonitor
 │   └── Dockerfile
 └── docs/
-    └── architecture.md        # Diagramme de séquence (Mermaid)
+    ├── architecture.md        # Diagramme de séquence (Mermaid)
+    └── DOSSIER_TECHNIQUE.md   # Choix d'outils (+ tableau statut CNCF), incidents, preuves
 ```
 
-Voir `docs/architecture.md` pour le cycle de vie complet d'une faille (détection → PR → merge humain → sync Argo CD).
+Voir `docs/architecture.md` pour le cycle de vie complet d'une faille (détection → PR → merge humain → sync Argo CD), et `docs/DOSSIER_TECHNIQUE.md` §2.0 pour le tableau récapitulatif du statut CNCF de chaque outil.

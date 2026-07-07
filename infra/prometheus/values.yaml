@@ -1,4 +1,6 @@
-# Référence : consommé par infra/argocd/applications/prometheus.yaml
+# Référence — les vraies values sont inline (valuesObject) dans
+# infra/argocd/applications/prometheus.yaml, conservé ici comme
+# documentation / valeurs de secours pour un déploiement Helm manuel.
 prometheus:
   prometheusSpec:
     retention: 15d
@@ -7,3 +9,20 @@ prometheus:
 grafana:
   enabled: true
   defaultDashboardsEnabled: true
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      labelValue: "1"
+  # Dashboards officiels importés depuis grafana.com par ID (Trivy Operator,
+  # Falco) — voir infra/argocd/applications/prometheus.yaml pour le détail.
+  dashboards:
+    default:
+      trivy-operator:
+        gnetId: 17813
+        revision: 1
+        datasource: Prometheus
+      falco:
+        gnetId: 11914
+        revision: 1
+        datasource: Prometheus

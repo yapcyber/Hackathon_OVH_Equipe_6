@@ -1,0 +1,99 @@
+# Dashboard custom (nos métriques ai_remediation_*, pas de gnetId officiel
+# possible ici) — auto-importé par le sidecar Grafana de kube-prometheus-stack
+# grâce au label grafana_dashboard: "1" (voir infra/prometheus/values.yaml).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-ai-remediation-loop
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  ai-remediation-loop.json: |
+    {
+      "title": "Boucle de remédiation IA — Équipe 6",
+      "uid": "ai-remediation-loop",
+      "schemaVersion": 39,
+      "version": 1,
+      "editable": true,
+      "time": { "from": "now-6h", "to": "now" },
+      "refresh": "30s",
+      "panels": [
+        {
+          "id": 1,
+          "type": "stat",
+          "title": "Alertes reçues (5m)",
+          "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+          "targets": [
+            {
+              "expr": "sum(rate(ai_remediation_alerts_received_total[5m])) by (source)",
+              "legendFormat": "{{source}}"
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "type": "stat",
+          "title": "Alertes ignorées (5m) — dédoublonnage / hors périmètre",
+          "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
+          "targets": [
+            {
+              "expr": "sum(rate(ai_remediation_alerts_ignored_total[5m])) by (reason)",
+              "legendFormat": "{{reason}}"
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Jobs de remédiation créés (1h)",
+          "gridPos": { "h": 6, "w": 6, "x": 12, "y": 0 },
+          "targets": [
+            {
+              "expr": "sum(increase(ai_remediation_jobs_created_total[1h]))"
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "type": "stat",
+          "title": "Pull Requests ouvertes (1h)",
+          "gridPos": { "h": 6, "w": 6, "x": 18, "y": 0 },
+          "targets": [
+            {
+              "expr": "sum(increase(ai_remediation_job_outcomes_total{outcome=\"pr_opened\"}[1h]))"
+            }
+          ],
+          "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "green" } } }
+        },
+        {
+          "id": 5,
+          "type": "timeseries",
+          "title": "Résultat des Jobs de remédiation, par issue",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+          "targets": [
+            {
+              "expr": "sum(rate(ai_remediation_job_outcomes_total[5m])) by (outcome)",
+              "legendFormat": "{{outcome}}"
+            }
+          ]
+        },
+        {
+          "id": 6,
+          "type": "timeseries",
+          "title": "Latence appel AI Endpoints (p50 / p95)",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.5, sum(rate(ai_remediation_ai_call_duration_seconds_bucket[15m])) by (le))",
+              "legendFormat": "p50"
+            },
+            {
+              "expr": "histogram_quantile(0.95, sum(rate(ai_remediation_ai_call_duration_seconds_bucket[15m])) by (le))",
+              "legendFormat": "p95"
+            }
+          ],
+          "fieldConfig": { "defaults": { "unit": "s" } }
+        }
+      ]
+    }

@@ -17,6 +17,22 @@ Règle non négociable : **aucune remédiation automatique n'est appliquée sur 
 
 ## 2. Choix des outils et justification
 
+### 2.0 Tableau récapitulatif du statut CNCF
+
+Le brief impose une stack "strictement CNCF" — voici le statut réel de maturité de chaque brique (vérifié sur `cncf.io` / annonces officielles, pas approximatif) :
+
+| Outil | Rôle dans notre architecture | Statut CNCF | Repère |
+|---|---|---|---|
+| **Argo CD** | Synchronisation GitOps | **Graduated** | Incubating 26/03/2020 → Graduated 06/12/2022 |
+| **Kyverno** | Policy-as-code (admission) | **Graduated** | Incubating 13/07/2022 → Graduated 16/03/2026 (très récent) |
+| **Falco** | Détection runtime (syscalls) | **Graduated** | Incubating 08/01/2020 → Graduated 29/02/2024 |
+| **Prometheus** | Observabilité / métriques | **Graduated** | 2ᵉ projet CNCF gradué (après Kubernetes), le 09/08/2018 |
+| **Trivy (Operator)** | Audit de sécurité (images/config) | **Hors gouvernance CNCF** | Projet Aqua Security, listé dans le CNCF Cloud Native Landscape mais pas hébergé par la CNCF |
+| *(alternative non retenue)* Kubescape | Audit de sécurité | Incubating | Accepté CNCF en 2022 — seule alternative "vraiment CNCF" à Trivy pour ce rôle |
+| OVHcloud AI Endpoints | Couche IA (génération de correctifs) | Hors périmètre CNCF | Service cloud propriétaire, imposé par le brief (souveraineté numérique) |
+
+**Point de transparence assumé devant le jury** : le brief propose « Kubescape *ou* Trivy » comme si les deux étaient équivalents côté CNCF — ce n'est pas le cas. Trivy (Aqua Security) n'est pas un projet hébergé par la CNCF, contrairement à Kubescape qui est en *Incubating*. Nous avons choisi Trivy Operator malgré ça pour des raisons techniques concrètes (voir §2.3 : webhook natif, CRD persistants) — un compromis pragmatique explicite, pas une méconnaissance du statut réel des projets.
+
 ### 2.1 Argo CD (synchronisation GitOps) — pas de débat, imposé par le brief
 Choix d'implémentation : **pattern "app-of-apps"**. Une seule Application racine (`infra-app-of-apps`) pointe vers `infra/argocd/applications/` dans le repo Git ; ce dossier contient les manifestes `Application` de chaque brique (Kyverno, Falco, Trivy Operator, Prometheus, moteur IA, workload de démo). Avantage : un seul point d'entrée bootstrap (`kubectl apply -f infra/argocd/applications/app-of-apps.yaml`), tout le reste se déploie en cascade depuis Git.
 
@@ -38,6 +54,10 @@ Déployé avec le driver **`modern_ebpf`** plutôt que le driver noyau classique
 
 ### 2.5 Prometheus (kube-prometheus-stack)
 Chart standard `kube-prometheus-stack` (Prometheus + Grafana + kube-state-metrics + node-exporter + Alertmanager). Choisi car c'est le chart de référence de la communauté Prometheus Operator, avec ServiceMonitor auto-découverte — cohérent avec l'esprit "déclaratif" du reste de la stack.
+
+**Observabilité du moteur IA lui-même** (pas seulement du cluster) : `webhook_receiver.py` expose `/metrics` (scrapé via `k8s/servicemonitor.yaml`) avec des compteurs `ai_remediation_alerts_received_total`, `ai_remediation_alerts_ignored_total{reason}`, `ai_remediation_jobs_created_total` et `ai_remediation_job_outcomes_total{outcome}` + un histogramme `ai_remediation_ai_call_duration_seconds`. Problème spécifique résolu : les `Job` de remédiation sont éphémères (quelques secondes à minutes) et ne peuvent pas être scrapés directement par Prometheus — chaque `Job` pousse donc son résultat (succès/échec, latence de l'appel IA) au webhook via un endpoint interne `/internal/job-metrics` (`job_runner/metrics.py`, best-effort, un échec de reporting ne fait jamais échouer le `Job`), plutôt que de déployer un Pushgateway supplémentaire.
+
+Trois dashboards Grafana provisionnés en GitOps (`infra/argocd/applications/prometheus.yaml` + `infra/prometheus/dashboards/`) : Trivy Operator et Falco importés depuis grafana.com par ID (`17813`, `11914`, pas de JSON à maintenir), et un dashboard custom "Boucle de remédiation IA" sur nos métriques (alertes reçues/ignorées, Jobs créés, PR ouvertes, latence IA).
 
 ### 2.6 OVHcloud AI Endpoints (couche IA)
 Modèle utilisé : **`Meta-Llama-3_3-70B-Instruct`**, appelé via l'API compatible OpenAI d'OVHcloud.

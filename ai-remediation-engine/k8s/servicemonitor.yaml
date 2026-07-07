@@ -1,0 +1,21 @@
+# Scrape Prometheus du webhook receiver (seul composant durable du moteur IA
+# — les Jobs éphémères ne peuvent pas être scrapés directement, voir
+# job_runner/metrics.py). Le label `release: prometheus` correspond au
+# releaseName Helm de kube-prometheus-stack (infra/argocd/applications/
+# prometheus.yaml) : nécessaire si serviceMonitorSelectorNilUsesHelmValues
+# repasse un jour à `true` (comportement par défaut du chart).
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: ai-remediation-webhook
+  namespace: remediation
+  labels:
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: ai-remediation-webhook
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
