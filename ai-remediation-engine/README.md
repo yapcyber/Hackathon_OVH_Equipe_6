@@ -12,9 +12,11 @@ sur le cluster.
   interne `/internal/job-metrics` où les Jobs éphémères reportent leur résultat.
 - `src/job_runner/` — code exécuté par chaque `Job` éphémère :
   - `enrichment.py` : lecture seule du manifeste K8s concerné (résolution ns/name/kind
-    propre à chaque source) + construction du prompt.
+    propre à chaque source) + contexte business (dernier déploiement, criticité,
+    code freeze) + construction du prompt demandant aussi une analyse de risque.
   - `ai_client.py` : appel `POST {OVH_AI_ENDPOINTS_BASE_URL}/chat/completions` (`https://oai.endpoints.kepler.ai.cloud.ovh.net/v1` par défaut, compatible OpenAI)
-    avec `Authorization: Bearer $OVH_AI_ENDPOINTS_ACCESS_TOKEN`.
+    avec `Authorization: Bearer $OVH_AI_ENDPOINTS_ACCESS_TOKEN` ; retourne aussi le
+    comptage de tokens pour le suivi de coût.
   - `validation.py` : valide le manifeste avec `kubeconform -strict` (100% local,
     aucun accès cluster) avant tout commit — un manifeste invalide fait échouer
     le Job, aucune PR n'est ouverte.
@@ -27,7 +29,7 @@ sur le cluster.
   - `main.py` : orchestration des étapes ci-dessus.
 - `k8s/networkpolicy.yaml` — seuls `falco`, `trivy-system` (alertes) et `monitoring`
   (scrape `/metrics`) peuvent atteindre le webhook.
-- `tests/` — suite `pytest` (29 tests, aucun accès réseau/cluster requis) : `pytest`
+- `tests/` — suite `pytest` (37 tests, aucun accès réseau/cluster requis) : `pytest`
   depuis ce dossier (`ai-remediation-engine/`), voir `pytest.ini`/`requirements-dev.txt`.
 
 ## Secrets requis (non versionnés)

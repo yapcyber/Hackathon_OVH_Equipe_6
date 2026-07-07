@@ -1,0 +1,17 @@
+# Referme tout accès entrant vers log4shell-demo : rien n'a besoin de le
+# joindre (Trivy scanne l'image, pas l'appli en marche) — évite qu'un autre
+# pod du cluster puisse réellement déclencher l'exploitation JNDI. Fichier
+# séparé de deployment.yaml, qui est lui la cible réécrite par le moteur IA
+# en cas de correctif (voir commentaire dans deployment.yaml).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: log4shell-demo-deny-ingress
+  namespace: demo
+spec:
+  podSelector:
+    matchLabels:
+      app: log4shell-demo
+  policyTypes:
+    - Ingress
+  ingress: []  # aucune règle = tout le trafic entrant est refusé

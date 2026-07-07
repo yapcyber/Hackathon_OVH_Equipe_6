@@ -1,0 +1,44 @@
+# Workload volontairement vulnérable — CVE-2021-44228 ("Log4Shell").
+# Contrairement à apps/vulnerable-demo/ (qui déclenche Trivy/Falco sur des
+# critères de CONFIG : tag latest, root, hostPath), celui-ci déclenche une
+# vraie VulnerabilityReport basée sur une CVE connue dans une dépendance
+# (log4j-core 2.14.1), pour démontrer la boucle IA sur un cas "CVE réelle"
+# plutôt que "mauvaise pratique de config".
+#
+# Image publique bien connue, utilisée dans de nombreuses formations sécu :
+# github.com/christophetd/log4shell-vulnerable-app — épinglée par digest.
+# Digest vérifié via l'API GitHub Packages, mais PAS testé par un pull réel
+# depuis cet environnement (ghcr.io y est bloqué) : à confirmer une fois sur
+# le cluster réel avant la démo.
+#
+# Aucun Service : Trivy scanne l'IMAGE (packages/JAR embarqués), pas besoin
+# que l'appli soit joignable pour détecter la CVE. Voir networkpolicy.yaml
+# (fichier séparé exprès : celui-ci est la cible que le moteur IA écrase en
+# cas de correctif — jamais mélanger plusieurs kinds dans le fichier cible,
+# voir KNOWN_REMEDIATION_TARGETS dans pr_generator.py).
+#
+# Ne JAMAIS exposer ce workload en dehors du cluster de démo.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: log4shell-demo
+  namespace: demo
+  labels:
+    app: log4shell-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: log4shell-demo
+  template:
+    metadata:
+      labels:
+        app: log4shell-demo
+    spec:
+      containers:
+        - name: app
+          image: ghcr.io/christophetd/log4shell-vulnerable-app@sha256:6f88430688108e512f7405ac3c73d47f5c370780b94182854ea2cddc6bd59929
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: 500m, memory: 512Mi }
+      restartPolicy: Always

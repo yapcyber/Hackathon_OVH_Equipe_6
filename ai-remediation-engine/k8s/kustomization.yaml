@@ -7,5 +7,6 @@ resources:
   - webhook-deployment.yaml
   - servicemonitor.yaml
   - networkpolicy.yaml
+  - freeze-calendar.yaml
 # secrets.example.yaml volontairement exclu : les vrais secrets ne sont
 # jamais gérés via ce Kustomization (cf. README ai-remediation-engine/).

@@ -21,11 +21,23 @@ WEBHOOK_METRICS_URL = os.environ.get(
 )
 
 
-def report(source: str, outcome: str, ai_call_seconds: float | None = None) -> None:
+def report(
+    source: str,
+    outcome: str,
+    ai_call_seconds: float | None = None,
+    prompt_tokens: int | None = None,
+    completion_tokens: int | None = None,
+) -> None:
     try:
         httpx.post(
             WEBHOOK_METRICS_URL,
-            json={"source": source, "outcome": outcome, "ai_call_seconds": ai_call_seconds},
+            json={
+                "source": source,
+                "outcome": outcome,
+                "ai_call_seconds": ai_call_seconds,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+            },
             timeout=5,
         )
     except Exception as exc:

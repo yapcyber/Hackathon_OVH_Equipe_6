@@ -75,28 +75,42 @@ def main() -> int:
     except Exception as exc:  # lecture best-effort, ne bloque pas le pipeline
         log.warning("Impossible de récupérer le manifeste cible: %s", exc)
 
-    prompt = enrichment.build_prompt(alert, manifest, kind)
+    # Contexte opérationnel pour l'analyse de risque business (best-effort,
+    # ne lève jamais — voir fetch_business_context).
+    business = enrichment.fetch_business_context(ns, name, kind)
+    log.info(
+        "Contexte business: criticité=%s, dernier déploiement=%s j, freeze=%s",
+        business.get("criticality"), business.get("last_deploy_days"), business.get("freeze_active"),
+    )
+
+    prompt = enrichment.build_prompt(alert, manifest, kind, business)
 
     ai_client = AIEndpointsClient()
     started = time.monotonic()
     try:
-        ai_response = ai_client.generate_remediation(prompt)
+        ai = ai_client.generate_remediation(prompt)
     except Exception:
         metrics.report(source, "ai_error")
         raise
     ai_call_seconds = time.monotonic() - started
-    log.info("Réponse IA reçue (%d caractères, %.1fs)", len(ai_response), ai_call_seconds)
+    # Tokens rapportés sur TOUTES les issues post-appel : le coût est engagé
+    # dès que l'IA a répondu, même si on n'ouvre finalement pas de PR.
+    toks = {"prompt_tokens": ai.prompt_tokens, "completion_tokens": ai.completion_tokens}
+    log.info(
+        "Réponse IA reçue (%d car., %.1fs, %d+%d tokens)",
+        len(ai.content), ai_call_seconds, ai.prompt_tokens, ai.completion_tokens,
+    )
 
     try:
-        patch_yaml = _extract_yaml_block(ai_response)
+        patch_yaml = _extract_yaml_block(ai.content)
     except ValueError:
-        metrics.report(source, "no_yaml_block", ai_call_seconds)
+        metrics.report(source, "no_yaml_block", ai_call_seconds, **toks)
         raise
 
     try:
         validation.validate_manifest(patch_yaml, kind)
     except validation.ValidationError:
-        metrics.report(source, "invalid_yaml", ai_call_seconds)
+        metrics.report(source, "invalid_yaml", ai_call_seconds, **toks)
         raise
 
     try:
@@ -106,13 +120,13 @@ def main() -> int:
             namespace=ns,
             name=name,
             patch_yaml=patch_yaml,
-            explanation=ai_response,
+            explanation=ai.content,
         )
     except Exception:
-        metrics.report(source, "pr_error", ai_call_seconds)
+        metrics.report(source, "pr_error", ai_call_seconds, **toks)
         raise
 
-    metrics.report(source, "pr_opened", ai_call_seconds)
+    metrics.report(source, "pr_opened", ai_call_seconds, **toks)
     log.info("Pull Request ouverte: %s", pr_url)
     return 0
 

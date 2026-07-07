@@ -27,6 +27,7 @@ GITHUB_REPO_SLUG = os.environ["GITHUB_REPO_SLUG"]  # ex: yapcyber/Hackathon_OVH_
 # on écrase un fichier existant suivi par Argo CD, jamais un fichier orphelin.
 KNOWN_REMEDIATION_TARGETS = {
     ("demo", "vulnerable-demo"): "apps/vulnerable-demo/deployment.yaml",
+    ("demo", "log4shell-demo"): "apps/log4shell-demo/deployment.yaml",
 }
 
 
@@ -98,6 +99,10 @@ def open_remediation_pr(
 
     pr_body = (
         f"### Correctif généré automatiquement (source: `{alert_source}`)\n\n"
+        "> ⚠️ Avant de merger, lire la section **Analyse de risque du déploiement** "
+        "ci-dessous : elle indique s'il est prudent d'appliquer ce correctif "
+        "maintenant ou de le reporter (criticité du service, ancienneté du dernier "
+        "déploiement, code freeze éventuel).\n\n"
         f"{explanation}\n\n"
         "**Ce correctif n'a pas été appliqué automatiquement.** "
         "Merge manuel requis après revue humaine.\n"

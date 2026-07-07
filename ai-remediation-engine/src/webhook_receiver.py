@@ -48,6 +48,22 @@ JOB_OUTCOMES = Counter(
 AI_CALL_DURATION = Histogram(
     "ai_remediation_ai_call_duration_seconds", "Latence de l'appel AI Endpoints", ["source"]
 )
+AI_TOKENS = Counter(
+    "ai_remediation_ai_tokens_total",
+    "Tokens consommés par les appels AI Endpoints (input/output)",
+    ["source", "type"],  # type = prompt | completion
+)
+AI_COST_EUR = Counter(
+    "ai_remediation_ai_cost_eur_total",
+    "Coût estimé cumulé des appels AI Endpoints, en euros "
+    "(tokens * AI_PRICE_EUR_PER_MTOKEN / 1e6)",
+    ["source"],
+)
+
+# Prix OVHcloud AI Endpoints pour Meta-Llama-3.3-70B-Instruct : 0,67 €/Mtoken,
+# tarif uniforme input/output (source : catalogue OVHcloud, juillet 2026).
+# Configurable pour rester juste si le tarif change, sans redéployer l'image.
+AI_PRICE_EUR_PER_MTOKEN = float(os.environ.get("AI_PRICE_EUR_PER_MTOKEN", "0.67"))
 
 NAMESPACE = os.environ.get("NAMESPACE", "remediation")
 JOB_IMAGE = os.environ["JOB_IMAGE"]  # image de ai-remediation-engine/Dockerfile
@@ -255,8 +271,10 @@ class JobMetricReport(BaseModel):
     cluster."""
 
     source: str
-    outcome: str  # pr_opened | ai_error | no_yaml_block | pr_error
+    outcome: str  # pr_opened | ai_error | no_yaml_block | invalid_yaml | pr_error
     ai_call_seconds: float | None = None
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
 
 
 @app.post("/internal/job-metrics")
@@ -264,6 +282,17 @@ async def job_metrics(report: JobMetricReport):
     JOB_OUTCOMES.labels(source=report.source, outcome=report.outcome).inc()
     if report.ai_call_seconds is not None:
         AI_CALL_DURATION.labels(source=report.source).observe(report.ai_call_seconds)
+    total_tokens = 0
+    if report.prompt_tokens:
+        AI_TOKENS.labels(source=report.source, type="prompt").inc(report.prompt_tokens)
+        total_tokens += report.prompt_tokens
+    if report.completion_tokens:
+        AI_TOKENS.labels(source=report.source, type="completion").inc(report.completion_tokens)
+        total_tokens += report.completion_tokens
+    if total_tokens:
+        AI_COST_EUR.labels(source=report.source).inc(
+            total_tokens * AI_PRICE_EUR_PER_MTOKEN / 1_000_000
+        )
     return Response(status_code=204)
 
 

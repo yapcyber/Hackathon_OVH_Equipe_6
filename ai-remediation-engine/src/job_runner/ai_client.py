@@ -8,10 +8,21 @@ jamais détenu par le webhook receiver).
 import logging
 import os
 import time
+from typing import NamedTuple
 
 import httpx
 
 log = logging.getLogger("remediation-job.ai-client")
+
+
+class AIResult(NamedTuple):
+    """Réponse de l'appel IA + comptage de tokens (bloc `usage` renvoyé par
+    l'API compatible OpenAI d'OVHcloud AI Endpoints). Les tokens servent au
+    suivi de coût (dashboard Grafana), pas au pipeline lui-même."""
+
+    content: str
+    prompt_tokens: int
+    completion_tokens: int
 
 AI_ENDPOINTS_BASE_URL = os.environ.get(
     "OVH_AI_ENDPOINTS_BASE_URL", "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1"
@@ -37,7 +48,7 @@ class AIEndpointsClient:
         max_retries: int = 3,
         backoff_seconds: float = 2.0,
         transport: httpx.BaseTransport | None = None,
-    ) -> str:
+    ) -> AIResult:
         """`transport` n'est là que pour les tests (httpx.MockTransport) — en
         production, None laisse httpx utiliser le transport réseau réel."""
         url = f"{self.base_url}/chat/completions"
@@ -79,6 +90,12 @@ class AIEndpointsClient:
                     )
                     time.sleep(wait)
                     continue
-                return resp.json()["choices"][0]["message"]["content"]
+                data = resp.json()
+                usage = data.get("usage", {})
+                return AIResult(
+                    content=data["choices"][0]["message"]["content"],
+                    prompt_tokens=int(usage.get("prompt_tokens", 0)),
+                    completion_tokens=int(usage.get("completion_tokens", 0)),
+                )
 
         raise last_exc  # pragma: no cover — inatteignable (la boucle raise ou return toujours)

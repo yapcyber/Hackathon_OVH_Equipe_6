@@ -145,6 +145,7 @@ Ingress autorisé vers le webhook (port `8080`) uniquement depuis : namespaces `
 | `DEDUP_TTL_SECONDS` | `300` | Fenêtre de déduplication des alertes |
 | `WATCHED_NAMESPACE` | `demo` | Seul namespace applicatif surveillé |
 | `WEBHOOK_SHARED_TOKEN` | *(vide = auth désactivée)* | Header `X-Webhook-Token` requis si défini |
+| `AI_PRICE_EUR_PER_MTOKEN` | `0.67` | Prix par million de tokens, pour le calcul du coût cumulé |
 
 ### 7.7 Variables d'environnement (Job)
 
@@ -155,10 +156,30 @@ Ingress autorisé vers le webhook (port `8080`) uniquement depuis : namespaces `
 | `GITHUB_API_URL` | `https://api.github.com` | API GitHub pour l'ouverture de PR |
 | `FINGERPRINT` | propagé par le webhook | Identifiant de l'alerte (nom de branche/PR) |
 | `WEBHOOK_METRICS_URL` | `http://ai-remediation-webhook.remediation.svc.cluster.local:8080/internal/job-metrics` | Reporting best-effort du résultat |
+| `FREEZE_CONFIGMAP_NAMESPACE` | `remediation` | Namespace de la ConfigMap de code freeze |
+| `FREEZE_CONFIGMAP_NAME` | `freeze-calendar` | Nom de la ConfigMap de code freeze |
 
-Cible de remédiation connue (whitelist `KNOWN_REMEDIATION_TARGETS`, `pr_generator.py`) : `(demo, vulnerable-demo)` → `apps/vulnerable-demo/deployment.yaml`.
+Cibles de remédiation connues (whitelist `KNOWN_REMEDIATION_TARGETS`, `pr_generator.py`) : `(demo, vulnerable-demo)` → `apps/vulnerable-demo/deployment.yaml`, `(demo, log4shell-demo)` → `apps/log4shell-demo/deployment.yaml`.
 
-### 7.8 Image & dépendances
+### 7.7bis Analyse de risque business & calendrier de freeze
+
+- **ConfigMap `freeze-calendar`** (namespace `remediation`, versionnée en GitOps, pas un secret) : clés `active` (`"true"`/`"false"`), `until` (date de fin), `reason`. Lue en lecture seule par le Job.
+- **RBAC dédié** : `Role` namespacé `ai-remediation-job-configmaps` (`get`/`list` sur `configmaps`, namespace `remediation` uniquement) — délibérément pas un ClusterRole.
+- **Criticité business** : label ou annotation `business-criticality` (`critical`/`high`/`medium`/`low`) sur le `Deployment` ciblé ; `unknown` si absent.
+
+### 7.8 Métriques Prometheus exposées sur `/metrics`
+
+| Métrique | Type | Labels |
+|---|---|---|
+| `ai_remediation_alerts_received_total` | Counter | `source` |
+| `ai_remediation_alerts_ignored_total` | Counter | `source`, `reason` |
+| `ai_remediation_jobs_created_total` | Counter | `source` |
+| `ai_remediation_job_outcomes_total` | Counter | `source`, `outcome` |
+| `ai_remediation_ai_call_duration_seconds` | Histogram | `source` |
+| `ai_remediation_ai_tokens_total` | Counter | `source`, `type` (`prompt`/`completion`) |
+| `ai_remediation_ai_cost_eur_total` | Counter | `source` |
+
+### 7.9 Image & dépendances
 
 | Élément | Version |
 |---|---|
@@ -174,9 +195,14 @@ Cible de remédiation connue (whitelist `KNOWN_REMEDIATION_TARGETS`, `pr_generat
 
 ---
 
-## 8. Workload de démo (`demo`)
+## 8. Workloads de démo (`demo`)
 
-`apps/vulnerable-demo/deployment.yaml` — 1 `Deployment`, image `nginx:latest`, `runAsUser: 0`, volume `hostPath: /`. Non conforme par construction sur 4 points (audités par les 4 policies Kyverno `Audit`, §3).
+| Workload | Image | Déclenche | Exposition réseau |
+|---|---|---|---|
+| `vulnerable-demo` | `nginx:latest` | Config : tag flottant, `runAsUser: 0`, `hostPath: /` (4 policies Kyverno Audit) | Aucune (pas de Service) |
+| `log4shell-demo` | `ghcr.io/christophetd/log4shell-vulnerable-app@sha256:6f88430688108e512f7405ac3c73d47f5c370780b94182854ea2cddc6bd59929` | CVE réelle : `CVE-2021-44228` (log4j-core 2.14.1) via `VulnerabilityReport` Trivy | Aucune (pas de Service, `NetworkPolicy` deny-all ingress) |
+
+Cibles enregistrées dans `KNOWN_REMEDIATION_TARGETS` (`ai-remediation-engine/src/job_runner/pr_generator.py`) : `(demo, vulnerable-demo)` → `apps/vulnerable-demo/deployment.yaml`, `(demo, log4shell-demo)` → `apps/log4shell-demo/deployment.yaml`.
 
 ---
 

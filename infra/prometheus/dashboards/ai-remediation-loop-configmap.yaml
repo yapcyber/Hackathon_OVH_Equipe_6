@@ -94,6 +94,59 @@ data:
             }
           ],
           "fieldConfig": { "defaults": { "unit": "s" } }
+        },
+        {
+          "id": 7,
+          "type": "stat",
+          "title": "Coût IA cumulé (€)",
+          "gridPos": { "h": 6, "w": 6, "x": 0, "y": 14 },
+          "targets": [
+            { "expr": "sum(ai_remediation_ai_cost_eur_total)" }
+          ],
+          "fieldConfig": { "defaults": { "unit": "currencyEUR", "decimals": 4, "color": { "mode": "fixed", "fixedColor": "green" } } }
+        },
+        {
+          "id": 8,
+          "type": "stat",
+          "title": "Tokens consommés (total input+output)",
+          "gridPos": { "h": 6, "w": 6, "x": 6, "y": 14 },
+          "targets": [
+            { "expr": "sum(ai_remediation_ai_tokens_total)" }
+          ],
+          "fieldConfig": { "defaults": { "unit": "short" } }
+        },
+        {
+          "id": 9,
+          "type": "stat",
+          "title": "Coût projeté 30j au rythme actuel (€)",
+          "gridPos": { "h": 6, "w": 6, "x": 12, "y": 14 },
+          "targets": [
+            { "expr": "sum(rate(ai_remediation_ai_cost_eur_total[1h])) * 2592000" }
+          ],
+          "fieldConfig": { "defaults": { "unit": "currencyEUR", "decimals": 2 } }
+        },
+        {
+          "id": 10,
+          "type": "stat",
+          "title": "Coût moyen par PR ouverte (€)",
+          "gridPos": { "h": 6, "w": 6, "x": 18, "y": 14 },
+          "targets": [
+            { "expr": "sum(ai_remediation_ai_cost_eur_total) / clamp_min(sum(ai_remediation_job_outcomes_total{outcome=\"pr_opened\"}), 1)" }
+          ],
+          "fieldConfig": { "defaults": { "unit": "currencyEUR", "decimals": 4 } }
+        },
+        {
+          "id": 11,
+          "type": "timeseries",
+          "title": "Débit de tokens (input vs output)",
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 20 },
+          "targets": [
+            {
+              "expr": "sum(rate(ai_remediation_ai_tokens_total[5m])) by (type)",
+              "legendFormat": "{{type}}"
+            }
+          ],
+          "fieldConfig": { "defaults": { "unit": "short" } }
         }
       ]
     }

@@ -1,0 +1,23 @@
+# Calendrier de code freeze — lu (lecture seule) par le Job de remédiation
+# pour l'analyse de risque business (voir job_runner/enrichment.py).
+#
+# Ce n'est PAS un secret : c'est une donnée opérationnelle, versionnée en
+# GitOps comme le reste. L'équipe plateforme la modifie via une PR (ou
+# kubectl edit en urgence), sans toucher au code du moteur.
+#
+# active: "true"  -> l'IA sait qu'un freeze est en cours et recommandera
+#                    plutôt de reporter les correctifs non urgents.
+# active: "false" -> fonctionnement normal (valeur par défaut hors période chaude).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: freeze-calendar
+  namespace: remediation
+data:
+  active: "false"
+  until: ""
+  reason: ""
+  # Exemple pour une période Black Friday :
+  #   active: "true"
+  #   until: "2026-12-01"
+  #   reason: "Black Friday — code freeze, pic de charge, tout report non urgent"

@@ -67,7 +67,7 @@ Chart standard `kube-prometheus-stack` (Prometheus + Grafana + kube-state-metric
 
 **Observabilité du moteur IA lui-même** (pas seulement du cluster) : `webhook_receiver.py` expose `/metrics` (scrapé via `k8s/servicemonitor.yaml`) avec des compteurs `ai_remediation_alerts_received_total`, `ai_remediation_alerts_ignored_total{reason}`, `ai_remediation_jobs_created_total` et `ai_remediation_job_outcomes_total{outcome}` + un histogramme `ai_remediation_ai_call_duration_seconds`. Problème spécifique résolu : les `Job` de remédiation sont éphémères (quelques secondes à minutes) et ne peuvent pas être scrapés directement par Prometheus — chaque `Job` pousse donc son résultat (succès/échec, latence de l'appel IA) au webhook via un endpoint interne `/internal/job-metrics` (`job_runner/metrics.py`, best-effort, un échec de reporting ne fait jamais échouer le `Job`), plutôt que de déployer un Pushgateway supplémentaire.
 
-Trois dashboards Grafana provisionnés en GitOps (`infra/argocd/applications/prometheus.yaml` + `infra/prometheus/dashboards/`) : Trivy Operator et Falco importés depuis grafana.com par ID (`17813`, `11914`, pas de JSON à maintenir), et un dashboard custom "Boucle de remédiation IA" sur nos métriques (alertes reçues/ignorées, Jobs créés, PR ouvertes, latence IA).
+Trois dashboards Grafana provisionnés en GitOps (`infra/argocd/applications/prometheus.yaml` + `infra/prometheus/dashboards/`) : Trivy Operator et Falco importés depuis grafana.com par ID (`17813`, `11914`, pas de JSON à maintenir), et un dashboard custom "Boucle de remédiation IA" sur nos métriques (alertes reçues/ignorées, Jobs créés, PR ouvertes, latence IA, **et coût des appels IA** — voir §4.5).
 
 ### 2.6 OVHcloud AI Endpoints (couche IA)
 Modèle utilisé : **`Meta-Llama-3_3-70B-Instruct`**, appelé via l'API compatible OpenAI d'OVHcloud.
@@ -120,8 +120,8 @@ Justification de cette séparation :
 
 ### 4.2 Pipeline exact d'un Job de remédiation
 
-1. **`enrichment.py`** : parse le payload JSON de l'alerte (Falco ou Trivy), résout le namespace/name/kind **réel** de la ressource visée (Falco : `output_fields` puis remontée Pod → ReplicaSet → Deployment ; Trivy : labels `trivy-operator.resource.*` du CR `VulnerabilityReport`), va lire (lecture seule, RBAC dédié) le manifeste K8s correspondant pour donner du contexte, construit un prompt structuré.
-2. **`ai_client.py`** : `POST https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions` avec le modèle `Meta-Llama-3_3-70B-Instruct`, `temperature: 0.2` (réponses reproductibles, pas créatives), prompt système qui interdit explicitement à l'IA de proposer une commande à exécuter directement — l'IA doit renvoyer le **manifeste YAML complet et corrigé** (pas un diff partiel), dans le tout premier bloc ` ```yaml ` de sa réponse.
+1. **`enrichment.py`** : parse le payload JSON de l'alerte (Falco ou Trivy), résout le namespace/name/kind **réel** de la ressource visée (Falco : `output_fields` puis remontée Pod → ReplicaSet → Deployment ; Trivy : labels `trivy-operator.resource.*` du CR `VulnerabilityReport`), va lire (lecture seule, RBAC dédié) le manifeste K8s correspondant **et le contexte opérationnel** (ancienneté du dernier déploiement, criticité business, code freeze — voir §4.5), construit un prompt structuré.
+2. **`ai_client.py`** : `POST https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions` avec le modèle `Meta-Llama-3_3-70B-Instruct`, `temperature: 0.2` (réponses reproductibles, pas créatives), prompt système qui interdit explicitement à l'IA de proposer une commande à exécuter directement — l'IA doit renvoyer le **manifeste YAML complet et corrigé** (pas un diff partiel) dans le tout premier bloc ` ```yaml `, **plus une analyse de risque de déploiement** (§4.5). Retourne aussi le comptage de tokens (bloc `usage`) pour le suivi de coût.
 3. **`main.py`** : extrait ce premier bloc YAML de la réponse IA (regex sur les fences ` ```yaml `).
 4. **`validation.py`** : valide structurellement ce manifeste avec **`kubeconform -strict`** (schémas Kubernetes officiels, 100% local — pas d'appel au cluster). Si invalide, le `Job` échoue et **aucune PR n'est ouverte**. Volontairement pas de `kubectl apply --dry-run=server` : Kubernetes exige le verbe d'écriture réel même en dry-run, ce qui aurait cassé l'invariant central du projet (RBAC du `Job` strictement `get/list/watch`).
 5. **`pr_generator.py`** : clone le repo (`git clone --depth 1`), crée une branche `ai-remediation/<source>-<fingerprint>`, **écrase le fichier GitOps existant** correspondant à la cible résolue en (1) — cible vérifiée contre une whitelist explicite `KNOWN_REMEDIATION_TARGETS` (namespace, name) → chemin, jamais dérivée directement du payload — commit, **push**, puis appelle l'API GitHub `POST /repos/.../pulls` avec **`draft: true`**.
@@ -141,7 +141,35 @@ Déduplication : fingerprint SHA-256 sur `rule` (Falco) ou `metadata.name` (Triv
 - **Idempotence des PR** : un retry Kubernetes (`backoffLimit: 2`) réutilise le même `FINGERPRINT` (propagé par le webhook, pas recalculé depuis `HOSTNAME`) donc la même branche `ai-remediation/<source>-<fingerprint>`. Avant tout `git clone`, `pr_generator.py` interroge l'API GitHub (`GET /pulls?head=...&state=open`) : si une PR est déjà ouverte pour cette branche, elle est retournée telle quelle — aucun nouveau clone/commit/push. Le `push` final utilise `--force` (branche exclusivement possédée par le bot, jamais touchée par un humain) pour absorber une tentative précédente avortée avant l'ouverture de la PR.
 - **Retry sur l'appel IA** : `ai_client.py` retente automatiquement (backoff exponentiel, 3 tentatives par défaut) sur `429` et `5xx` — jamais sur les erreurs `4xx` (une erreur de requête ne se résout pas en réessayant).
 - **Parsing tolérant de la réponse IA** : `_extract_yaml_block` (main.py) ne prend plus aveuglément le premier bloc de code de la réponse — il prend le premier bloc qui parse comme un manifeste Kubernetes valide (dict avec une clé `kind`), tolérant sur la casse/présence de l'étiquette de langage (` ```yaml `, ` ```yml `, ` ```YAML `, ou nue).
-- **Tests unitaires** (`ai-remediation-engine/tests/`, 29 tests, `pytest`) : fingerprint/déduplication, authentification webhook, extraction du bloc YAML, résolution namespace/name/kind par source, fallback de `resolve_owning_deployment`, idempotence de `pr_generator`, retry de `ai_client`. Aucun test ne touche un vrai cluster ou le réseau (mocks `httpx.MockTransport`, monkeypatching).
+- **Tests unitaires** (`ai-remediation-engine/tests/`, 37 tests, `pytest`) : fingerprint/déduplication, authentification webhook, extraction du bloc YAML, résolution namespace/name/kind par source, fallback de `resolve_owning_deployment`, idempotence de `pr_generator`, retry de `ai_client`, parsing des tokens, calcul de coût, contexte business. Aucun test ne touche un vrai cluster ou le réseau (mocks `httpx.MockTransport`, `fastapi.testclient`, monkeypatching).
+
+### 4.5 Différenciateurs — l'IA analyse le risque *de déploiement*, et on mesure son coût
+
+Deux capacités qui vont au-delà du "l'IA détecte et corrige" attendu, pensées pour un contexte
+e-commerce en code freeze (voir le document de scénario Cdiscount à la racine).
+
+**(a) Analyse de risque business dans la PR.** Avant l'appel IA, `enrichment.fetch_business_context()`
+lit (100 % lecture seule, best-effort) trois données opérationnelles :
+- l'**ancienneté du dernier déploiement** du workload (condition la plus récente du `Deployment`, sinon date de création) ;
+- sa **criticité business** déclarée (label/annotation `business-criticality` : `critical`/`high`/`medium`/`low`) ;
+- l'état d'un **code freeze** (ConfigMap `freeze-calendar` dans le namespace `remediation` : `active`/`until`/`reason`).
+
+Ces trois signaux sont injectés dans le prompt, qui demande explicitement à l'IA — **en plus** du
+correctif YAML habituel — une section « Analyse de risque du déploiement » : un score LOW/MEDIUM/HIGH
+du risque d'**appliquer** le correctif (pas de la gravité de la faille) et une recommandation datée
+(« appliquer maintenant » / « reporter à la fin du freeze le JJ/MM » / « heures creuses avec rollback
+préparé »). Le correctif est **toujours** fourni, même quand la reco est de reporter : le but est qu'il
+soit prêt, revu, validé — la décision d'appliquer reste 100 % humaine. Le corps de la PR met cette
+section en avant avant le diff. Coût sécurité : nul — un `get` supplémentaire sur les `configmaps` du
+seul namespace `remediation` (Role namespacé dédié, pas un ClusterRole), aucun droit d'écriture ajouté.
+
+**(b) Observabilité du coût des appels IA.** La réponse de l'API (bloc `usage` compatible OpenAI)
+donne le nombre de tokens input/output. `ai_client.py` les remonte, le Job les pousse au webhook, qui
+expose `ai_remediation_ai_tokens_total{type}` et un coût cumulé `ai_remediation_ai_cost_eur_total`
+(tokens × prix/Mtoken configurable, **0,67 €/Mtoken** pour Llama 3.3 70B sur OVHcloud AI Endpoints,
+tarif catalogue juillet 2026). Le dashboard Grafana affiche le coût cumulé, les tokens consommés, une
+**projection 30 jours au rythme actuel**, et le **coût moyen par PR ouverte** — l'argument chiffré
+« combien nous coûte réellement cette automatisation » face au MTTR économisé.
 
 ---
 
@@ -201,6 +229,8 @@ Test de bout en bout exécuté sur le cluster réel (pas un mock) :
 4. Branche créée, commit poussé, **Pull Request #1 ouverte en `draft`** sur `yapcyber/Hackathon_OVH_Equipe_6` — vérifié via l'API GitHub (`draft: true`, `state: open`).
 5. Aucune action automatique au-delà de l'ouverture de la PR — merge fait/refusé manuellement par un humain de l'équipe.
 
+**Second workload de démo — `apps/log4shell-demo/`** : `vulnerable-demo` déclenche Trivy/Falco sur des critères de *configuration* (tag `latest`, root, `hostPath`). Pour démontrer la boucle sur une **CVE réelle** détectée dans une dépendance applicative (pas une mauvaise pratique de manifeste), on déploie `ghcr.io/christophetd/log4shell-vulnerable-app` (épinglé par digest), vulnérable à **CVE-2021-44228 "Log4Shell"** (log4j-core 2.14.1). Aucun `Service` exposé et une `NetworkPolicy` referme tout accès entrant : Trivy scanne l'image (JAR embarqués), pas besoin — et surtout pas question — que l'appli soit joignable ou exploitable. Cible enregistrée dans `KNOWN_REMEDIATION_TARGETS` (`pr_generator.py`) comme `vulnerable-demo`.
+
 ---
 
 ## 8. Dette technique connue (assumée, non bloquante)
@@ -227,7 +257,7 @@ Voir `docs/demo-runbook.sh` — script bash interactif, 6 phases (GitOps → Kyv
 
 | Job | Ce qu'il vérifie |
 |---|---|
-| `unit-tests` | `pytest` sur `ai-remediation-engine/tests/` (29 tests, §4.4) |
+| `unit-tests` | `pytest` sur `ai-remediation-engine/tests/` (37 tests, §4.4) |
 | `validate-manifests` | `kubectl kustomize` + `kubeconform -strict` sur les deux Kustomization (`ai-remediation-engine/k8s`, `apps/vulnerable-demo`) et sur les manifestes bruts (Applications Argo CD, AppProject, ClusterPolicy Kyverno, dashboards Grafana) — schémas CRD via le catalogue communautaire `datreeio/CRDs-catalog` |
 | `kyverno-policy-regression` | `kyverno apply` contre `vulnerable-demo` doit rester exactement à `pass: 2, fail: 4` — détecte une policy cassée silencieusement ou un `vulnerable-demo` "corrigé" sans mise à jour du test |
 | `build-and-push` | Build + push `ghcr.io/.../ai-remediation-engine:latest` et `:sha-<commit>`, uniquement sur push vers `main`, après succès des 3 jobs précédents |

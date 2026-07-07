@@ -20,13 +20,14 @@ Stack : Argo CD · Trivy Operator · Falco · Kyverno · Prometheus · OVHcloud 
 │       ├── values.yaml        # values kube-prometheus-stack (référence)
 │       └── dashboards/        # ConfigMaps Grafana (dashboard custom moteur IA)
 ├── apps/
-│   └── vulnerable-demo/       # Workload volontairement vulnérable (démo)
+│   ├── vulnerable-demo/       # Workload volontairement vulnérable — critères de CONFIG (démo)
+│   └── log4shell-demo/       # Workload volontairement vulnérable — CVE réelle (CVE-2021-44228)
 ├── ai-remediation-engine/     # Moteur IA : webhook + Job d'enrichissement/PR
 │   ├── src/
 │   │   ├── webhook_receiver.py    # Deployment : ingestion + métriques /metrics
 │   │   └── job_runner/            # Job éphémère : enrichissement/validation/IA/PR/metrics
 │   ├── k8s/                   # RBAC, Deployment (probes), ServiceMonitor, NetworkPolicy
-│   ├── tests/                 # pytest (29 tests, aucun accès réseau/cluster)
+│   ├── tests/                 # pytest (37 tests, aucun accès réseau/cluster)
 │   └── Dockerfile             # inclut kubeconform (validation locale des manifestes)
 └── docs/
     ├── architecture.md        # Diagramme de séquence (Mermaid)

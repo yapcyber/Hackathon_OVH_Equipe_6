@@ -26,6 +26,11 @@ spec:
               value: remediation
             - name: JOB_IMAGE
               value: "ghcr.io/yapcyber/ai-remediation-engine:latest"
+            # Prix OVHcloud AI Endpoints (Llama 3.3 70B) : 0,67 €/Mtoken,
+            # sert au calcul du coût cumulé exposé sur /metrics. Ajustable ici
+            # sans rebuild d'image si le tarif change.
+            - name: AI_PRICE_EUR_PER_MTOKEN
+              value: "0.67"
             - name: WEBHOOK_SHARED_TOKEN
               valueFrom:
                 secretKeyRef:
