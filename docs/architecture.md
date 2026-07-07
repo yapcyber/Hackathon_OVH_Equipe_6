@@ -29,8 +29,13 @@ sequenceDiagram
     Job->>Job: Enrichissement (contexte K8s, manifeste, CVE, règle Falco)
     Job->>AI: POST /chat/completions (Bearer token)
     AI-->>Job: Manifeste corrigé complet (YAML) + explication
-    Job->>Git: Écrase le fichier existant (cible whitelistée) + commit
-    Job->>Git: Ouverture Pull Request (draft)
+    Job->>Job: Validation structurelle (kubeconform, 100% local, 0 accès cluster)
+    alt Manifeste invalide
+        Job->>Job: Job en échec — aucune PR ouverte
+    else Manifeste valide
+        Job->>Git: Écrase le fichier existant (cible whitelistée) + commit
+        Job->>Git: Ouverture Pull Request (draft)
+    end
     deactivate Job
 
     Git-->>Human: Notification PR à valider

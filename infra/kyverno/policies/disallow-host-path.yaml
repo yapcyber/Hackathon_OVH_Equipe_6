@@ -1,0 +1,30 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-host-path
+  annotations:
+    policies.kyverno.io/title: Disallow hostPath
+    policies.kyverno.io/category: Pod Security Standards (Baseline)
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod, Volume
+    policies.kyverno.io/description: >-
+      Un volume hostPath donne accès au système de fichiers du node, ce qui
+      permet une évasion de conteneur triviale. Mode Audit ici (vulnerable-demo
+      monte volontairement hostPath: / pour être flaggé par Trivy) — génère
+      un PolicyReport plutôt que de bloquer la démo.
+spec:
+  validationFailureAction: Audit
+  background: true
+  rules:
+    - name: host-path-blocked
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      validate:
+        message: "Les volumes hostPath sont interdits : accès direct au système de fichiers du node."
+        pattern:
+          spec:
+            =(volumes):
+              - X(hostPath): "null"

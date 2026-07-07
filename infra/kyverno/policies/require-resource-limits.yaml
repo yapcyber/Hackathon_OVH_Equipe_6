@@ -1,0 +1,33 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-resource-limits
+  annotations:
+    policies.kyverno.io/title: Require Resource Limits
+    policies.kyverno.io/category: Best Practices
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      Sans limites CPU/mémoire, un conteneur compromis ou buggé peut affamer
+      les autres workloads du node. Mode Audit ici (vulnerable-demo n'en
+      déclare volontairement pas) — génère un PolicyReport plutôt que de
+      bloquer la démo.
+spec:
+  validationFailureAction: Audit
+  background: true
+  rules:
+    - name: validate-resources
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      validate:
+        message: "Chaque conteneur doit déclarer spec.containers[*].resources.limits.{cpu,memory}."
+        pattern:
+          spec:
+            containers:
+              - resources:
+                  limits:
+                    memory: "?*"
+                    cpu: "?*"

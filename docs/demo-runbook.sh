@@ -69,6 +69,23 @@ echo
 echo ">>> Bloqué à l'admission, AVANT même d'atteindre un node. <<<"
 pause
 
+echo "4 autres ClusterPolicy tournent en mode Audit (n'bloquent jamais la"
+echo "démo, mais génèrent un PolicyReport) — elles capturent exactement les"
+echo "4 défauts volontaires de vulnerable-demo (tag latest, hostPath, root,"
+echo "pas de limites de ressources) :"
+echo
+kubectl get clusterpolicy
+echo
+kubectl -n demo get policyreport -o json 2>/dev/null | \
+  python3 -c "
+import json,sys
+d = json.load(sys.stdin)
+for r in d.get('items', []):
+    s = r.get('summary', {})
+    print(r['metadata']['name'], '->', s)
+" || echo "(aucun PolicyReport pour le moment, le scan background n'est peut-être pas encore passé)"
+pause
+
 
 # ────────────────────────────────────────────────────────────────────
 banner "PHASE 2 — Trivy Operator : audit de sécurité continu"

@@ -10,7 +10,7 @@ import re
 import sys
 import time
 
-from job_runner import enrichment, metrics
+from job_runner import enrichment, metrics, validation
 from job_runner.ai_client import AIEndpointsClient
 from job_runner.pr_generator import open_remediation_pr
 
@@ -74,6 +74,12 @@ def main() -> int:
         patch_yaml = _extract_yaml_block(ai_response)
     except ValueError:
         metrics.report(source, "no_yaml_block", ai_call_seconds)
+        raise
+
+    try:
+        validation.validate_manifest(patch_yaml, kind)
+    except validation.ValidationError:
+        metrics.report(source, "invalid_yaml", ai_call_seconds)
         raise
 
     try:

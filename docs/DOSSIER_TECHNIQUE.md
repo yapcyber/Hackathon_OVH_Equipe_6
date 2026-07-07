@@ -41,7 +41,17 @@ Chaque `Application` a `syncPolicy.automated.{prune,selfHeal}: true` : Argo CD s
 ### 2.2 Kyverno (policy-as-code) — choisi plutôt qu'OPA/Gatekeeper
 Raison : policies natives en YAML (pas de langage Rego à apprendre), CRD `ClusterPolicy` directement lisible par un non-spécialiste — plus adapté à une démo devant un jury qui doit comprendre la policy en un coup d'œil.
 
-Policy livrée : `disallow-privileged-containers` (`infra/kyverno/policies/`), en mode **`Enforce`** (bloque à l'admission, pas juste un warning) + `background: true` (audite aussi les ressources déjà existantes). Testée en conditions réelles : `kubectl run` avec `securityContext.privileged: true` → rejeté par le webhook d'admission Kyverno avant même d'atteindre un node.
+5 `ClusterPolicy` livrées (`infra/kyverno/policies/`) :
+
+| Policy | Mode | Ce qu'elle détecte |
+|---|---|---|
+| `disallow-privileged-containers` | **Enforce** | `securityContext.privileged: true` — bloqué à l'admission |
+| `disallow-latest-tag` | Audit | Image sans tag explicite, ou taguée `:latest` |
+| `disallow-host-path` | Audit | Volume `hostPath` (évasion de conteneur triviale) |
+| `require-run-as-nonroot` | Audit | Conteneur sans `runAsNonRoot: true` |
+| `require-resource-limits` | Audit | Conteneur sans `resources.limits.{cpu,memory}` |
+
+Une seule policy en `Enforce` (testée en conditions réelles : `kubectl run` avec `securityContext.privileged: true` → rejeté par le webhook d'admission Kyverno avant même d'atteindre un node). Les 4 autres sont volontairement en **`Audit`** : elles ne bloquent jamais `vulnerable-demo`, dont le rôle est justement de rester déployable tout en cumulant ces 4 défauts (`nginx:latest`, `runAsUser: 0`, `hostPath: /`, aucune limite de ressources) pour déclencher Trivy/Falco. Chaque policy a été validée avec `kyverno apply infra/kyverno/policies/ --resource apps/vulnerable-demo/deployment.yaml` avant commit : les 4 policies Audit échouent bien sur ce manifeste (`fail: 4`), preuve qu'elles détectent réellement ce qu'elles annoncent, pas juste une CRD qui existe sans jamais matcher. `background: true` sur toutes : elles auditent aussi les ressources déjà existantes, pas seulement les nouvelles admissions.
 
 ### 2.3 Trivy Operator — choisi plutôt que Kubescape
 Le brief laissait le choix. Trivy Operator a été préféré car :
@@ -113,7 +123,8 @@ Justification de cette séparation :
 1. **`enrichment.py`** : parse le payload JSON de l'alerte (Falco ou Trivy), résout le namespace/name/kind **réel** de la ressource visée (Falco : `output_fields` puis remontée Pod → ReplicaSet → Deployment ; Trivy : labels `trivy-operator.resource.*` du CR `VulnerabilityReport`), va lire (lecture seule, RBAC dédié) le manifeste K8s correspondant pour donner du contexte, construit un prompt structuré.
 2. **`ai_client.py`** : `POST https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions` avec le modèle `Meta-Llama-3_3-70B-Instruct`, `temperature: 0.2` (réponses reproductibles, pas créatives), prompt système qui interdit explicitement à l'IA de proposer une commande à exécuter directement — l'IA doit renvoyer le **manifeste YAML complet et corrigé** (pas un diff partiel), dans le tout premier bloc ` ```yaml ` de sa réponse.
 3. **`main.py`** : extrait ce premier bloc YAML de la réponse IA (regex sur les fences ` ```yaml `).
-4. **`pr_generator.py`** : clone le repo (`git clone --depth 1`), crée une branche `ai-remediation/<source>-<fingerprint>`, **écrase le fichier GitOps existant** correspondant à la cible résolue en (1) — cible vérifiée contre une whitelist explicite `KNOWN_REMEDIATION_TARGETS` (namespace, name) → chemin, jamais dérivée directement du payload — commit, **push**, puis appelle l'API GitHub `POST /repos/.../pulls` avec **`draft: true`**.
+4. **`validation.py`** : valide structurellement ce manifeste avec **`kubeconform -strict`** (schémas Kubernetes officiels, 100% local — pas d'appel au cluster). Si invalide, le `Job` échoue et **aucune PR n'est ouverte**. Volontairement pas de `kubectl apply --dry-run=server` : Kubernetes exige le verbe d'écriture réel même en dry-run, ce qui aurait cassé l'invariant central du projet (RBAC du `Job` strictement `get/list/watch`).
+5. **`pr_generator.py`** : clone le repo (`git clone --depth 1`), crée une branche `ai-remediation/<source>-<fingerprint>`, **écrase le fichier GitOps existant** correspondant à la cible résolue en (1) — cible vérifiée contre une whitelist explicite `KNOWN_REMEDIATION_TARGETS` (namespace, name) → chemin, jamais dérivée directement du payload — commit, **push**, puis appelle l'API GitHub `POST /repos/.../pulls` avec **`draft: true`**.
 
 Le fichier écrasé est déjà référencé dans le `kustomization.yaml` de l'app GitOps concernée : après merge humain, Argo CD applique donc réellement le correctif au prochain sync (contrairement à une première version qui écrivait un fichier séparé jamais inclus dans les `resources:` de Kustomize — le correctif n'était alors jamais appliqué, seulement présent dans Git).
 
@@ -137,6 +148,8 @@ Déduplication : fingerprint SHA-256 sur `rule` (Falco) ou `metadata.name` (Triv
 | Le webhook ne peut créer que des Jobs | `Role ai-remediation-webhook` : `create/get/list` sur `batch/jobs` dans son propre namespace, rien d'autre |
 | Seul Argo CD applique un changement au cluster | Toujours après merge humain du diff proposé — jamais avant |
 | Policy Kyverno de base | `disallow-privileged-containers` en `Enforce`, testée en direct |
+| PR jamais ouverte si YAML invalide | `kubeconform -strict` en local dans le `Job` (§4.2) — sans étendre le RBAC read-only |
+| Défauts connus du workload audités | 4 policies Kyverno Audit (`disallow-latest-tag`, `disallow-host-path`, `require-run-as-nonroot`, `require-resource-limits`) |
 
 ---
 
@@ -181,7 +194,7 @@ Test de bout en bout exécuté sur le cluster réel (pas un mock) :
 ## 8. Dette technique connue (assumée, non bloquante)
 
 - Les CronJobs internes `kyverno-cleanup-*` (fournis par le chart Kyverno lui-même, pas notre code) restent en `ImagePullBackOff` — n'affecte pas le fonctionnement de la policy engine (`ClusterPolicy` reste `Ready`/`Enforce`).
-- Une seule `ClusterPolicy` livrée (`disallow-privileged-containers`) — volontairement minimal pour amorcer, extensible (ex: interdire `hostPath`, forcer des `resources.limits`, etc.).
+- 5 `ClusterPolicy` livrées (§2.2) — extensible plus loin (ex: `disallow-capabilities`, `require-non-root-group`, etc.), mais couvre déjà les 4 défauts volontaires de `vulnerable-demo`.
 
 ---
 

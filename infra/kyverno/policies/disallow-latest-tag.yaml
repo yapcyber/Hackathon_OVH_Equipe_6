@@ -1,0 +1,42 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-latest-tag
+  annotations:
+    policies.kyverno.io/title: Disallow Latest Tag
+    policies.kyverno.io/category: Best Practices
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      Le tag ':latest' est mutable : impossible de garantir quelle version
+      tourne réellement, rend les rollbacks non fiables. Mode Audit
+      (n'bloque pas la démo, vulnerable-demo utilise nginx:latest
+      volontairement pour être flaggé par Trivy) : génère un PolicyReport.
+spec:
+  validationFailureAction: Audit
+  background: true
+  rules:
+    - name: require-image-tag
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      validate:
+        message: "Un tag d'image explicite est requis (ex: nginx:1.27, pas seulement 'nginx')."
+        pattern:
+          spec:
+            containers:
+              - image: "*:*"
+    - name: validate-tag
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      validate:
+        message: "Le tag ':latest' est interdit — utiliser une version explicite et immuable."
+        pattern:
+          spec:
+            containers:
+              - image: "!*:latest"
